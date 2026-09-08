@@ -11,6 +11,8 @@ This repository is a Go service that periodically creates a MongoDB dump, compre
 - A Google Cloud service account with the Google Drive API enabled
 - A Google Drive folder shared with the service account
 
+For a step-by-step guide to create the Google service account and JSON credentials, see [How to get Google Credentials.md](How%20to%20get%20Google%20Credentials.md).
+
 ## 2. Copy the example environment file
 
 ```bash

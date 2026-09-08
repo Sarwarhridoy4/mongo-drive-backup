@@ -43,6 +43,8 @@ go run ./cmd/backup --once
 
 For a complete step-by-step run guide, see [How to run.md](How%20to%20run.md).
 
+To generate the Google Drive service-account credentials used by this app, see [How to get Google Credentials.md](How%20to%20get%20Google%20Credentials.md).
+
 ## Google Cloud Setup
 
 1. Create a Google Cloud project.
