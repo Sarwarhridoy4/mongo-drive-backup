@@ -1,0 +1,10 @@
+bin/
+dist/
+.env
+.env.local
+*.json
+credentials/
+secrets/
+.idea/
+.vscode/
+.DS_Store
