@@ -17,19 +17,19 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|---|---|---|
-| `APP_ENV` | Environment | `production` |
-| `MONGODB_URI` | MongoDB connection string | Required |
-| `MONGODB_DATABASE` | Database name to backup | Required |
-| `BACKUP_SCHEDULE` | Cron schedule | `0 2 * * *` |
-| `BACKUP_TIMEZONE` | Schedule timezone | `UTC` |
-| `GOOGLE_DRIVE_FOLDER_ID` | Target Drive folder | Required |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON | Required |
-| `BACKUP_RETENTION_DAYS` | Retention in days | `30` |
-| `TEMP_BACKUP_DIR` | Temp directory | `/tmp/mongodb-backups` |
-| `RUN_BACKUP_ON_START` | Run backup on startup | `false` |
-| `WEB_PORT` | Web UI port, e.g. `8080` | Optional |
+| Variable                      | Description               | Default                |
+| ----------------------------- | ------------------------- | ---------------------- |
+| `APP_ENV`                     | Environment               | `production`           |
+| `MONGODB_URI`                 | MongoDB connection string | Required               |
+| `MONGODB_DATABASE`            | Database name to backup   | Required               |
+| `BACKUP_SCHEDULE`             | Cron schedule             | `0 2 * * *`            |
+| `BACKUP_TIMEZONE`             | Schedule timezone         | `UTC`                  |
+| `GOOGLE_DRIVE_FOLDER_ID`      | Target Drive folder       | Required               |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON      | Required               |
+| `BACKUP_RETENTION_DAYS`       | Retention in days         | `30`                   |
+| `TEMP_BACKUP_DIR`             | Temp directory            | `/tmp/mongodb-backups` |
+| `RUN_BACKUP_ON_START`         | Run backup on startup     | `false`                |
+| `WEB_PORT`                    | Web UI port, e.g. `8080`  | Optional               |
 
 ## Local Development
 
@@ -40,6 +40,8 @@ cp .env.example .env
 go mod download
 go run ./cmd/backup --once
 ```
+
+For a complete step-by-step run guide, see [How to run.md](How%20to%20run.md).
 
 ## Google Cloud Setup
 
@@ -70,6 +72,7 @@ WEB_PORT=8080 go run ./cmd/backup
 Then open `http://localhost:8080`.
 
 The dashboard shows:
+
 - current configuration
 - last backup status
 - last uploaded file and size
