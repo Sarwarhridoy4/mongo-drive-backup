@@ -19,6 +19,7 @@ type Config struct {
 	RetentionDays      int
 	TempBackupDir      string
 	RunOnStart         bool
+	WebPort            string
 }
 
 func Load() (*Config, error) {
@@ -32,6 +33,7 @@ func Load() (*Config, error) {
 		ServiceAccountJSON: os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
 		TempBackupDir:      getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
 		RunOnStart:         getEnvBool("RUN_BACKUP_ON_START", false),
+		WebPort:            getEnvOrDefault("WEB_PORT", ""),
 	}
 
 	if v := os.Getenv("BACKUP_RETENTION_DAYS"); v != "" {

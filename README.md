@@ -29,6 +29,7 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 | `BACKUP_RETENTION_DAYS` | Retention in days | `30` |
 | `TEMP_BACKUP_DIR` | Temp directory | `/tmp/mongodb-backups` |
 | `RUN_BACKUP_ON_START` | Run backup on startup | `false` |
+| `WEB_PORT` | Web UI port, e.g. `8080` | Optional |
 
 ## Local Development
 
@@ -57,6 +58,24 @@ Create a folder in Google Drive and share it with the service account email. Cop
 ```bash
 go run ./cmd/backup
 ```
+
+## Web UI
+
+Set `WEB_PORT` to enable the built-in dashboard:
+
+```bash
+WEB_PORT=8080 go run ./cmd/backup
+```
+
+Then open `http://localhost:8080`.
+
+The dashboard shows:
+- current configuration
+- last backup status
+- last uploaded file and size
+- manual backup trigger
+
+In Coolify, expose the same `WEB_PORT` as a public port if you want to access the dashboard.
 
 ## Manual Backup
 

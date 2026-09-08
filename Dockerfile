@@ -26,4 +26,7 @@ USER appuser
 
 WORKDIR /app
 
+ARG WEB_PORT=8080
+EXPOSE ${WEB_PORT}
+
 ENTRYPOINT ["/app/backup"]
