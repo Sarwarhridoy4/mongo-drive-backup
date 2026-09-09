@@ -106,7 +106,13 @@ Then visit:
 http://localhost:8080
 ```
 
-The dashboard reads the configured environment, current schedule, and the latest backup result.
+The dashboard shows:
+- current configuration
+- last backup status and progress
+- backups currently in Google Drive
+- recent log history
+- manual backup trigger
+- stop service button
 
 ## 5. Docker build and run
 
@@ -136,6 +142,7 @@ The Dockerfile exposes `WEB_PORT` through an `ARG` and `EXPOSE` declaration.
 - Use environment secrets in Coolify or another deployment platform.
 - If you want the UI available in Coolify, expose the same port via `WEB_PORT`.
 - The service writes temporary dump and archive files in `TEMP_BACKUP_DIR`; they are cleaned after the archive completes and the file is uploaded.
+- The Docker image includes a healthcheck on `/healthz` for Coolify.
 
 ## 7. Troubleshooting
 

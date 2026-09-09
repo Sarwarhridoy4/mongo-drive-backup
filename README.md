@@ -120,9 +120,12 @@ Then open `http://localhost:8080`.
 
 The dashboard shows:
 - current configuration
-- last backup status
+- last backup status and progress
 - last uploaded file and size
+- backups currently in Google Drive
+- recent log history
 - manual backup trigger
+- stop service button
 
 In Coolify, expose the same `WEB_PORT` as a public port if you want to access the dashboard.
 
@@ -145,6 +148,13 @@ docker run --rm mongo-drive-backup --once
 2. In Coolify, create a new application from the repository.
 3. Set the environment variables in Coolify.
 4. Deploy.
+
+The Dockerfile includes:
+- Multi-stage build with static binary
+- `mongodump` installed
+- Healthcheck on `/healthz`
+- OAuth preflight flow before backups start
+- Non-root runtime user
 
 ## Troubleshooting
 
