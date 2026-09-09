@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
+
+	driveapi "google.golang.org/api/drive/v3"
 
 	"github.com/sarwar/mongo-drive-backup/internal/backup"
 	"github.com/sarwar/mongo-drive-backup/internal/config"
@@ -48,13 +51,32 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 			uploader = drive.NewUploader(cfg.DriveFolderID, []byte(cfg.ServiceAccountJSON), log)
 		}
 	} else if cfg.OAuthCredentialsFile != "" {
+		var baseUploader *drive.OAuth2Uploader
 		if cfg.SharedDriveID != "" {
-			uploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+			baseUploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
 		} else {
-			uploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+			baseUploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		}
+		if webSrv != nil {
+			callbackURL := fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
+			uploader = baseUploader.WithCallbackURL(callbackURL, webSrv.OAuthCodeCh())
+		} else {
+			uploader = baseUploader
 		}
 	} else {
 		return fmt.Errorf("no google drive credentials configured")
+	}
+
+	if webSrv != nil {
+		if u, ok := uploader.(interface {
+			ListFiles(context.Context) ([]*driveapi.File, error)
+		}); ok {
+			webSrv.SetListBackups(func() ([]*driveapi.File, error) {
+				c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				return u.ListFiles(c)
+			})
+		}
 	}
 
 	dumpDir, err := mongoDumper.Dump(ctx)
@@ -183,6 +205,19 @@ func main() {
 				}()
 			}
 		}()
+
+		go func() {
+			<-webSrv.StopCh()
+			log.Info("service_stop_requested", nil)
+			cancel()
+		}()
+	}
+
+	if err := ensureOAuthIfNeeded(ctx, cfg, log, webSrv); err != nil {
+		log.Error("oauth_setup_failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		os.Exit(1)
 	}
 
 	if once {
@@ -201,4 +236,42 @@ func main() {
 		})
 		os.Exit(1)
 	}
+}
+
+func ensureOAuthIfNeeded(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server) error {
+	if cfg.ServiceAccountJSON != "" || cfg.OAuthCredentialsFile == "" {
+		return nil
+	}
+
+	log.Info("oauth_preflight_check", map[string]interface{}{
+		"token_file": cfg.OAuthTokenFile,
+	})
+
+	var baseUploader *drive.OAuth2Uploader
+	if cfg.SharedDriveID != "" {
+		baseUploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+	} else {
+		baseUploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+	}
+
+	if webSrv != nil {
+		callbackURL := fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
+		baseUploader.WithCallbackURL(callbackURL, webSrv.OAuthCodeCh())
+	}
+
+	if _, err := baseUploader.TokenFromFile(); err == nil {
+		log.Info("oauth_token_exists", map[string]interface{}{
+			"file": cfg.OAuthTokenFile,
+		})
+		return nil
+	}
+
+	log.Info("oauth_starting_preflight_flow", nil)
+
+	if _, err := baseUploader.GetTokenFromWeb(ctx); err != nil {
+		return fmt.Errorf("oauth preflight flow failed: %w", err)
+	}
+
+	log.Info("oauth_preflight_completed", nil)
+	return nil
 }

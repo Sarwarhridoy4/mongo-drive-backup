@@ -29,6 +29,7 @@ type Entry struct {
 type Logger struct {
 	logger *log.Logger
 	env    string
+	hooks  []func(Entry)
 }
 
 func New(env string, w io.Writer) *Logger {
@@ -41,12 +42,20 @@ func New(env string, w io.Writer) *Logger {
 	}
 }
 
+func (l *Logger) AddHook(hook func(Entry)) {
+	l.hooks = append(l.hooks, hook)
+}
+
 func (l *Logger) log(level Level, event string, fields map[string]interface{}) {
 	entry := Entry{
 		Level:  string(level),
 		Event:  event,
 		Time:   time.Now().UTC(),
 		Fields: fields,
+	}
+
+	for _, hook := range l.hooks {
+		hook(entry)
 	}
 
 	if l.env == "production" {

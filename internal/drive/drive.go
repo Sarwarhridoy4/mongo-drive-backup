@@ -161,6 +161,8 @@ type OAuth2Uploader struct {
 	sharedDriveID string
 	credsPath     string
 	tokenPath     string
+	callbackURL   string
+	oauthCodeCh   <-chan string
 	log           *logger.Logger
 }
 
@@ -181,6 +183,12 @@ func NewOAuth2UploaderWithSharedDrive(folderID, sharedDriveID, credsPath, tokenP
 		tokenPath:     tokenPath,
 		log:           log,
 	}
+}
+
+func (o *OAuth2Uploader) WithCallbackURL(url string, ch <-chan string) *OAuth2Uploader {
+	o.callbackURL = url
+	o.oauthCodeCh = ch
+	return o
 }
 
 func (o *OAuth2Uploader) Upload(ctx context.Context, path, filename string) (string, int64, error) {
@@ -284,6 +292,10 @@ func (o *OAuth2Uploader) newService(ctx context.Context) (*drive.Service, error)
 		return nil, fmt.Errorf("parse oauth credentials: %w", err)
 	}
 
+	if o.callbackURL != "" {
+		config.RedirectURL = o.callbackURL
+	}
+
 	tok, err := o.tokenFromFile()
 	if err != nil {
 		o.log.Info("oauth_starting_browser_flow", map[string]interface{}{
@@ -341,11 +353,19 @@ func (o *OAuth2Uploader) getTokenFromWeb(ctx context.Context, config *oauth2.Con
 		return nil, fmt.Errorf("open browser failed: %w", err)
 	}
 
-	fmt.Printf("Authorize this app at:\n%s\n\nAfter approval, paste the authorization code here:\n", authURL)
-
 	var code string
-	if _, err := fmt.Scan(&code); err != nil {
-		return nil, fmt.Errorf("read authorization code: %w", err)
+	if o.oauthCodeCh != nil {
+		o.log.Info("oauth_waiting_for_browser_callback", nil)
+		select {
+		case code = <-o.oauthCodeCh:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	} else {
+		fmt.Printf("Authorize this app at:\n%s\n\nAfter approval, paste the authorization code here:\n", authURL)
+		if _, err := fmt.Scan(&code); err != nil {
+			return nil, fmt.Errorf("read authorization code: %w", err)
+		}
 	}
 
 	tok, err := config.Exchange(ctx, code)
@@ -354,6 +374,28 @@ func (o *OAuth2Uploader) getTokenFromWeb(ctx context.Context, config *oauth2.Con
 	}
 
 	return tok, nil
+}
+
+func (o *OAuth2Uploader) TokenFromFile() (*oauth2.Token, error) {
+	return o.tokenFromFile()
+}
+
+func (o *OAuth2Uploader) GetTokenFromWeb(ctx context.Context) (*oauth2.Token, error) {
+	b, err := os.ReadFile(o.credsPath)
+	if err != nil {
+		return nil, fmt.Errorf("read oauth credentials file: %w", err)
+	}
+
+	config, err := google.ConfigFromJSON(b, drive.DriveFileScope)
+	if err != nil {
+		return nil, fmt.Errorf("parse oauth credentials: %w", err)
+	}
+
+	if o.callbackURL != "" {
+		config.RedirectURL = o.callbackURL
+	}
+
+	return o.getTokenFromWeb(ctx, config)
 }
 
 func (o *OAuth2Uploader) saveToken(tok *oauth2.Token) error {

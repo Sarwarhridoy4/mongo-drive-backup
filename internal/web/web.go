@@ -2,9 +2,12 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
+
+	"google.golang.org/api/drive/v3"
 
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
 )
@@ -21,6 +24,7 @@ type Status struct {
 	LastError   string `json:"last_error,omitempty"`
 	LastFile    string `json:"last_file,omitempty"`
 	LastSize    string `json:"last_size,omitempty"`
+	Progress    string `json:"progress,omitempty"`
 }
 
 type Server struct {
@@ -31,13 +35,21 @@ type Server struct {
 	log         *logger.Logger
 	lastRunMu   sync.RWMutex
 	lastRunTime time.Time
+	oauthCodeCh chan string
+	stopCh      chan struct{}
+	logs        []logger.Entry
+	logsMu      sync.RWMutex
+	listBackups func() ([]*drive.File, error)
 }
 
 func NewServer(port string, log *logger.Logger) *Server {
-	return &Server{
-		port:      port,
-		log:       log,
-		triggerCh: make(chan struct{}, 1),
+	s := &Server{
+		port:        port,
+		log:         log,
+		triggerCh:   make(chan struct{}, 1),
+		oauthCodeCh: make(chan string, 1),
+		stopCh:      make(chan struct{}),
+		logs:        make([]logger.Entry, 0, 200),
 		status: Status{
 			Environment: "production",
 			Schedule:    "0 2 * * *",
@@ -45,6 +57,23 @@ func NewServer(port string, log *logger.Logger) *Server {
 			LastStatus:  "idle",
 		},
 	}
+	log.AddHook(s.appendLog)
+	return s
+}
+
+func (s *Server) appendLog(entry logger.Entry) {
+	s.logsMu.Lock()
+	defer s.logsMu.Unlock()
+	s.logs = append(s.logs, entry)
+	if len(s.logs) > 200 {
+		s.logs = s.logs[len(s.logs)-200:]
+	}
+}
+
+func (s *Server) SetListBackups(fn func() ([]*drive.File, error)) {
+	s.logsMu.Lock()
+	defer s.logsMu.Unlock()
+	s.listBackups = fn
 }
 
 func (s *Server) SetConfig(cfgStatus Status) {
@@ -57,6 +86,14 @@ func (s *Server) Trigger() <-chan struct{} {
 	return s.triggerCh
 }
 
+func (s *Server) OAuthCodeCh() <-chan string {
+	return s.oauthCodeCh
+}
+
+func (s *Server) StopCh() <-chan struct{} {
+	return s.stopCh
+}
+
 func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	s.lastRunMu.Lock()
 	defer s.lastRunMu.Unlock()
@@ -67,6 +104,7 @@ func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	s.status.LastBackup = s.lastRunTime.Format(time.RFC3339)
 	s.status.LastFile = file
 	s.status.LastSize = formatBytes(size)
+	s.status.Progress = ""
 
 	if err != nil {
 		s.status.LastStatus = "failed"
@@ -77,12 +115,30 @@ func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	}
 }
 
+func (s *Server) SetRunning() {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.status.LastStatus = "running"
+	s.status.LastError = ""
+	s.status.Progress = ""
+}
+
+func (s *Server) SetProgress(progress string) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.status.Progress = progress
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/backup/now", s.handleBackupNow)
+	mux.HandleFunc("/api/stop", s.handleStop)
+	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/backups", s.handleBackups)
+	mux.HandleFunc("/oauth2callback", s.handleOAuth2Callback)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -144,6 +200,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
           <div class="text-xs text-slate-400">Last Error</div>
           <div id="last_error" class="mt-1 font-medium text-red-400 break-all">-</div>
         </div>
+        <div class="sm:col-span-2">
+          <div class="text-xs text-slate-400">Progress</div>
+          <div id="progress" class="mt-1 font-medium text-slate-300">-</div>
+        </div>
       </div>
     </div>
 
@@ -151,7 +211,20 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       <button id="runNow" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium">
         Run Backup Now
       </button>
+      <button id="stopNow" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-medium">
+        Stop Service
+      </button>
       <span id="message" class="text-sm text-slate-400"></span>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
+      <h2 class="text-lg font-semibold mb-4">Backups in Google Drive</h2>
+      <div id="backups" class="text-sm text-slate-300">Loading...</div>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
+      <h2 class="text-lg font-semibold mb-4">Log History</h2>
+      <div id="logs" class="text-sm text-slate-300 font-mono whitespace-pre-wrap max-h-96 overflow-auto">Loading...</div>
     </div>
   </div>
 
@@ -167,9 +240,36 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       document.getElementById('last_file').textContent = data.last_file || '-';
       document.getElementById('last_size').textContent = data.last_size || '-';
       document.getElementById('last_error').textContent = data.last_error || '-';
+      document.getElementById('progress').textContent = data.progress || '-';
       const statusEl = document.getElementById('last_status');
       statusEl.textContent = data.last_status;
-      statusEl.className = 'mt-1 font-medium ' + (data.last_status === 'success' ? 'text-emerald-400' : data.last_status === 'failed' ? 'text-red-400' : 'text-slate-300');
+      statusEl.className = 'mt-1 font-medium ' + (data.last_status === 'success' ? 'text-emerald-400' : data.last_status === 'failed' ? 'text-red-400' : data.last_status === 'running' ? 'text-amber-400' : 'text-slate-300');
+    }
+
+    async function loadLogs() {
+      const res = await fetch('/api/logs');
+      const logs = await res.json();
+      const el = document.getElementById('logs');
+      if (!logs.length) {
+        el.textContent = 'No logs yet';
+        return;
+      }
+      el.textContent = logs.slice(-100).map(l => '[' + l.time + '] ' + l.level.toUpperCase() + ' ' + l.event + ' ' + JSON.stringify(l.fields || {})).join('\n');
+    }
+
+    async function loadBackups() {
+      const res = await fetch('/api/backups');
+      if (res.status === 204) {
+        document.getElementById('backups').textContent = 'No backups found';
+        return;
+      }
+      const items = await res.json();
+      const el = document.getElementById('backups');
+      if (!items.length) {
+        el.textContent = 'No backups found';
+        return;
+      }
+      el.innerHTML = items.map(item => '<div class="mb-2 break-all"><a href="https://drive.google.com/open?id=' + item.id + '" target="_blank" class="text-indigo-400 hover:underline">' + item.name + '</a> <span class="text-slate-400">(' + item.size + ')</span> <span class="text-slate-500">' + item.mtime + '</span></div>').join('');
     }
 
     document.getElementById('runNow').addEventListener('click', async () => {
@@ -183,8 +283,25 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       }
     });
 
+    document.getElementById('stopNow').addEventListener('click', async () => {
+      const msg = document.getElementById('message');
+      msg.textContent = 'Stopping...';
+      const res = await fetch('/api/stop', { method: 'POST' });
+      if (res.status === 202) {
+        msg.textContent = 'Stop signal sent';
+      } else {
+        msg.textContent = 'Failed: ' + (await res.text());
+      }
+    });
+
     loadStatus();
-    setInterval(loadStatus, 3000);
+    loadLogs();
+    loadBackups();
+    setInterval(() => {
+      loadStatus();
+      loadLogs();
+      loadBackups();
+    }, 3000);
   </script>
 </body>
 </html>`
@@ -220,6 +337,94 @@ func (s *Server) handleBackupNow(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "backup already running", http.StatusTooManyRequests)
 	}
+}
+
+func (s *Server) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("missing code"))
+		return
+	}
+
+	select {
+	case s.oauthCodeCh <- code:
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OAuth authorization successful. You can close this tab."))
+	default:
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("oauth callback not ready"))
+	}
+}
+
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	select {
+	case s.stopCh <- struct{}{}:
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("stop signal sent"))
+	default:
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("already stopping"))
+	}
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.logsMu.RLock()
+	defer s.logsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.logs)
+}
+
+func (s *Server) handleBackups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.logsMu.RLock()
+	fn := s.listBackups
+	s.logsMu.RUnlock()
+
+	if fn == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	files, err := fn()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	type BackupItem struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Size  string `json:"size"`
+		MTime string `json:"mtime"`
+	}
+
+	items := make([]BackupItem, 0, len(files))
+	for _, f := range files {
+		items = append(items, BackupItem{
+			ID:    f.Id,
+			Name:  f.Name,
+			Size:  fmt.Sprintf("%d", f.Size),
+			MTime: f.ModifiedTime,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(items)
 }
 
 func formatBytes(b int64) string {
