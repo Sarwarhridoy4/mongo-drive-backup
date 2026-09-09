@@ -38,6 +38,9 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 	}
 
 	mongoDumper := backup.NewMongoDumper(cfg.MongoURI, cfg.MongoDatabase, tempDir, log)
+	if err := mongoDumper.Verify(); err != nil {
+		return err
+	}
 	archiver := backup.NewArchiver(tempDir, log)
 
 	var uploader interface {
@@ -54,9 +57,9 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 		var baseUploader *drive.OAuth2Uploader
 		if cfg.OAuthCredentialsJSON != "" {
 			if cfg.SharedDriveID != "" {
-				baseUploader = drive.NewOAuth2UploaderWithSharedDriveInline(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+				baseUploader = drive.NewOAuth2UploaderWithSharedDriveInline(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, cfg.OAuthTokenFile, log)
 			} else {
-				baseUploader = drive.NewOAuth2UploaderWithInline(cfg.DriveFolderID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+				baseUploader = drive.NewOAuth2UploaderWithInline(cfg.DriveFolderID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, cfg.OAuthTokenFile, log)
 			}
 		} else {
 			if cfg.SharedDriveID != "" {
@@ -258,9 +261,9 @@ func ensureOAuthIfNeeded(ctx context.Context, cfg *config.Config, log *logger.Lo
 	var baseUploader *drive.OAuth2Uploader
 	if cfg.OAuthCredentialsJSON != "" {
 		if cfg.SharedDriveID != "" {
-			baseUploader = drive.NewOAuth2UploaderWithSharedDriveInline(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+			baseUploader = drive.NewOAuth2UploaderWithSharedDriveInline(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, cfg.OAuthTokenFile, log)
 		} else {
-			baseUploader = drive.NewOAuth2UploaderWithInline(cfg.DriveFolderID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+			baseUploader = drive.NewOAuth2UploaderWithInline(cfg.DriveFolderID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, cfg.OAuthTokenFile, log)
 		}
 	} else {
 		if cfg.SharedDriveID != "" {
@@ -284,10 +287,18 @@ func ensureOAuthIfNeeded(ctx context.Context, cfg *config.Config, log *logger.Lo
 
 	log.Info("oauth_starting_preflight_flow", nil)
 
-	if _, err := baseUploader.GetTokenFromWeb(ctx); err != nil {
+	tok, err := baseUploader.GetTokenFromWeb(ctx)
+	if err != nil {
 		return fmt.Errorf("oauth preflight flow failed: %w", err)
 	}
 
+	if err := baseUploader.SaveToken(tok); err != nil {
+		return fmt.Errorf("save oauth token: %w", err)
+	}
+
+	log.Info("oauth_token_saved", map[string]interface{}{
+		"file": cfg.OAuthTokenFile,
+	})
 	log.Info("oauth_preflight_completed", nil)
 	return nil
 }

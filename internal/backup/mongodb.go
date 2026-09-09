@@ -34,6 +34,17 @@ func NewMongoDumper(uri, database, outDir string, log *logger.Logger) *MongoDump
 	}
 }
 
+func (m *MongoDumper) Verify() error {
+	path, err := exec.LookPath(m.mongodump)
+	if err != nil {
+		return fmt.Errorf("mongodump not found at %q: %w", m.mongodump, err)
+	}
+	m.log.Info("mongodump_verified", map[string]interface{}{
+		"path": path,
+	})
+	return nil
+}
+
 func (m *MongoDumper) Dump(ctx context.Context) (string, error) {
 	ts := time.Now().UTC().Format("2006-01-02-150405")
 	dumpDir := filepath.Join(m.outDir, fmt.Sprintf("mongodb-%s-%s", m.database, ts))

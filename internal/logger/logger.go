@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorCyan   = "\033[36m"
+	colorGray   = "\033[90m"
+)
+
 type Level string
 
 const (
@@ -66,8 +75,36 @@ func (l *Logger) log(level Level, event string, fields map[string]interface{}) {
 		}
 	}
 
-	prefix := fmt.Sprintf("[%s] %s: ", entry.Time.Format(time.RFC3339), strings.ToUpper(entry.Level))
-	l.logger.Printf("%s%s %v", prefix, entry.Event, entry.Fields)
+	levelColor := colorCyan
+	switch level {
+	case LevelError:
+		levelColor = colorRed
+	case LevelWarn:
+		levelColor = colorYellow
+	case LevelInfo:
+		levelColor = colorGreen
+	}
+
+	timestamp := entry.Time.Format("15:04:05")
+	prefix := fmt.Sprintf("%s[%s] %s%s", colorGray, timestamp, levelColor, strings.ToUpper(entry.Level))
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s%s %s%s\n", prefix, colorReset, colorCyan, event))
+
+	if len(entry.Fields) > 0 {
+		sb.WriteString(fmt.Sprintf("  %s│%s ", colorGray, colorReset))
+		first := true
+		for _, v := range entry.Fields {
+			if !first {
+				sb.WriteString(fmt.Sprintf("  %s·%s ", colorGray, colorReset))
+			}
+			sb.WriteString(fmt.Sprintf("%s=%s%v", colorYellow, colorReset, v))
+			first = false
+		}
+		sb.WriteString("\n")
+	}
+
+	l.logger.Print(sb.String())
 }
 
 func (l *Logger) Info(event string, fields map[string]interface{}) {

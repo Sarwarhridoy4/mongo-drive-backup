@@ -158,8 +158,8 @@ docker run --rm mongo-drive-backup --once
 4. Deploy.
 
 The Dockerfile includes:
-- Multi-stage build with static binary
-- `mongodump` installed
+- Single-stage self-contained build — no Go or `mongodump` required on the host
+- `mongodump` installed via Alpine packages
 - Healthcheck on `/healthz`
 - OAuth preflight flow before backups start
 - Non-root runtime user

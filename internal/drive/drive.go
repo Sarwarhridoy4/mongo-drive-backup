@@ -187,21 +187,23 @@ func NewOAuth2UploaderWithSharedDrive(folderID, sharedDriveID, credsPath, tokenP
 	}
 }
 
-func NewOAuth2UploaderWithInline(folderID, credsJSON, tokenJSON string, log *logger.Logger) *OAuth2Uploader {
+func NewOAuth2UploaderWithInline(folderID, credsJSON, tokenJSON, tokenPath string, log *logger.Logger) *OAuth2Uploader {
 	return &OAuth2Uploader{
 		folderID:  folderID,
 		credsJSON: credsJSON,
 		tokenJSON: tokenJSON,
+		tokenPath: tokenPath,
 		log:       log,
 	}
 }
 
-func NewOAuth2UploaderWithSharedDriveInline(folderID, sharedDriveID, credsJSON, tokenJSON string, log *logger.Logger) *OAuth2Uploader {
+func NewOAuth2UploaderWithSharedDriveInline(folderID, sharedDriveID, credsJSON, tokenJSON, tokenPath string, log *logger.Logger) *OAuth2Uploader {
 	return &OAuth2Uploader{
 		folderID:      folderID,
 		sharedDriveID: sharedDriveID,
 		credsJSON:     credsJSON,
 		tokenJSON:     tokenJSON,
+		tokenPath:     tokenPath,
 		log:           log,
 	}
 }
@@ -332,7 +334,7 @@ func (o *OAuth2Uploader) newService(ctx context.Context) (*drive.Service, error)
 		if err != nil {
 			return nil, fmt.Errorf("oauth web flow failed: %w", err)
 		}
-		if err := o.saveToken(tok); err != nil {
+		if err := o.SaveToken(tok); err != nil {
 			return nil, fmt.Errorf("save oauth token: %w", err)
 		}
 		o.log.Info("oauth_token_saved", map[string]interface{}{
@@ -381,7 +383,7 @@ func (o *OAuth2Uploader) tokenFromData() (*oauth2.Token, error) {
 	return &tok, nil
 }
 
-func (o *OAuth2Uploader) saveToken(tok *oauth2.Token) error {
+func (o *OAuth2Uploader) SaveToken(tok *oauth2.Token) error {
 	if o.tokenJSON != "" {
 		return nil
 	}
