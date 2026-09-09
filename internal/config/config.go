@@ -9,33 +9,37 @@ import (
 )
 
 type Config struct {
-	AppEnv             string
-	MongoURI           string
-	MongoDatabase      string
-	BackupSchedule     string
-	BackupTimezone     string
-	DriveFolderID      string
-	SharedDriveID      string
-	ServiceAccountJSON string
-	RetentionDays      int
-	TempBackupDir      string
-	RunOnStart         bool
-	WebPort            string
+	AppEnv               string
+	MongoURI             string
+	MongoDatabase        string
+	BackupSchedule       string
+	BackupTimezone       string
+	DriveFolderID        string
+	SharedDriveID        string
+	ServiceAccountJSON   string
+	OAuthCredentialsFile string
+	OAuthTokenFile       string
+	RetentionDays        int
+	TempBackupDir        string
+	RunOnStart           bool
+	WebPort              string
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		AppEnv:             getEnvOrDefault("APP_ENV", "production"),
-		MongoURI:           os.Getenv("MONGODB_URI"),
-		MongoDatabase:      os.Getenv("MONGODB_DATABASE"),
-		BackupSchedule:     getEnvOrDefault("BACKUP_SCHEDULE", "0 2 * * *"),
-		BackupTimezone:     getEnvOrDefault("BACKUP_TIMEZONE", "UTC"),
-		DriveFolderID:      os.Getenv("GOOGLE_DRIVE_FOLDER_ID"),
-		SharedDriveID:      os.Getenv("GOOGLE_SHARED_DRIVE_ID"),
-		ServiceAccountJSON: os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
-		TempBackupDir:      getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
-		RunOnStart:         getEnvBool("RUN_BACKUP_ON_START", false),
-		WebPort:            getEnvOrDefault("WEB_PORT", ""),
+		AppEnv:               getEnvOrDefault("APP_ENV", "production"),
+		MongoURI:             os.Getenv("MONGODB_URI"),
+		MongoDatabase:        os.Getenv("MONGODB_DATABASE"),
+		BackupSchedule:       getEnvOrDefault("BACKUP_SCHEDULE", "0 2 * * *"),
+		BackupTimezone:       getEnvOrDefault("BACKUP_TIMEZONE", "UTC"),
+		DriveFolderID:        os.Getenv("GOOGLE_DRIVE_FOLDER_ID"),
+		SharedDriveID:        os.Getenv("GOOGLE_SHARED_DRIVE_ID"),
+		ServiceAccountJSON:   os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
+		OAuthCredentialsFile: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_FILE"),
+		OAuthTokenFile:       getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "./token.json"),
+		TempBackupDir:        getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
+		RunOnStart:           getEnvBool("RUN_BACKUP_ON_START", false),
+		WebPort:              getEnvOrDefault("WEB_PORT", ""),
 	}
 
 	if strings.TrimSpace(cfg.ServiceAccountJSON) == "" {
@@ -75,8 +79,8 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.DriveFolderID) == "" {
 		missing = append(missing, "GOOGLE_DRIVE_FOLDER_ID")
 	}
-	if strings.TrimSpace(c.ServiceAccountJSON) == "" {
-		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS")
+	if strings.TrimSpace(c.ServiceAccountJSON) == "" && strings.TrimSpace(c.OAuthCredentialsFile) == "" {
+		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_APPLICATION_CREDENTIALS, or GOOGLE_OAUTH_CREDENTIALS_FILE")
 	}
 
 	if len(missing) > 0 {

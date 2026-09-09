@@ -36,11 +36,25 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 
 	mongoDumper := backup.NewMongoDumper(cfg.MongoURI, cfg.MongoDatabase, tempDir, log)
 	archiver := backup.NewArchiver(tempDir, log)
-	var uploader *drive.Uploader
-	if cfg.SharedDriveID != "" {
-		uploader = drive.NewUploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, []byte(cfg.ServiceAccountJSON), log)
+
+	var uploader interface {
+		Upload(ctx context.Context, path, filename string) (string, int64, error)
+	}
+
+	if cfg.ServiceAccountJSON != "" {
+		if cfg.SharedDriveID != "" {
+			uploader = drive.NewUploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, []byte(cfg.ServiceAccountJSON), log)
+		} else {
+			uploader = drive.NewUploader(cfg.DriveFolderID, []byte(cfg.ServiceAccountJSON), log)
+		}
+	} else if cfg.OAuthCredentialsFile != "" {
+		if cfg.SharedDriveID != "" {
+			uploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		} else {
+			uploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		}
 	} else {
-		uploader = drive.NewUploader(cfg.DriveFolderID, []byte(cfg.ServiceAccountJSON), log)
+		return fmt.Errorf("no google drive credentials configured")
 	}
 
 	dumpDir, err := mongoDumper.Dump(ctx)

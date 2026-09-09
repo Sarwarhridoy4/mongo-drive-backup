@@ -13,25 +13,68 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 - Go 1.23+
 - Docker
 - MongoDB instance
-- Google Cloud service account with Drive API access
+- Google Drive destination folder
+- Either:
+  - Google Cloud service account with Drive API access **and** a Shared Drive, or
+  - Personal Gmail account using OAuth 2.0
 
 ## Environment Variables
 
-| Variable                      | Description               | Default                |
-| ----------------------------- | ------------------------- | ---------------------- |
-| `APP_ENV`                     | Environment               | `production`           |
-| `MONGODB_URI`                 | MongoDB connection string | Required               |
-| `MONGODB_DATABASE`            | Database name to backup   | Required               |
-| `BACKUP_SCHEDULE`             | Cron schedule             | `0 2 * * *`            |
-| `BACKUP_TIMEZONE`             | Schedule timezone         | `UTC`                  |
-| `GOOGLE_DRIVE_FOLDER_ID`      | Target Drive folder       | Required               |
-| `GOOGLE_SHARED_DRIVE_ID`      | Shared Drive ID           | Optional               |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON      | Required               |
-| `BACKUP_RETENTION_DAYS`       | Retention in days         | `30`                   |
-| `TEMP_BACKUP_DIR`             | Temp directory            | `/tmp/mongodb-backups` |
-| `RUN_BACKUP_ON_START`         | Run backup on startup     | `false`                |
-| `WEB_PORT`                    | Web UI port, e.g. `8080`  | Optional               |
-| `MONGODUMP_PATH`              | Full path to `mongodump`  | Optional               |
+| Variable                      | Description                              | Default                |
+| ----------------------------- | ---------------------------------------- | ---------------------- |
+| `APP_ENV`                     | Environment                              | `production`           |
+| `MONGODB_URI`                 | MongoDB connection string                | Required               |
+| `MONGODB_DATABASE`            | Database name to backup                  | Required               |
+| `BACKUP_SCHEDULE`             | Cron schedule                            | `0 2 * * *`            |
+| `BACKUP_TIMEZONE`             | Schedule timezone                        | `UTC`                  |
+| `GOOGLE_DRIVE_FOLDER_ID`      | Target Drive folder ID                   | Required               |
+| `GOOGLE_SHARED_DRIVE_ID`      | Shared Drive ID                          | Optional               |
+| `GOOGLE_OAUTH_CREDENTIALS_FILE` | OAuth client credentials JSON path      | Optional               |
+| `GOOGLE_OAUTH_TOKEN_FILE`     | OAuth token file path                    | `./token.json`         |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path        | Optional               |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON inline              | Optional               |
+| `BACKUP_RETENTION_DAYS`       | Retention in days                        | `30`                   |
+| `TEMP_BACKUP_DIR`             | Temp directory                           | `/tmp/mongodb-backups` |
+| `RUN_BACKUP_ON_START`         | Run backup on startup                    | `false`                |
+| `WEB_PORT`                    | Web UI port, e.g. `8080`                 | Optional               |
+| `MONGODUMP_PATH`              | Full path to `mongodump`                 | Optional               |
+
+## Authentication
+
+This app supports two authentication modes.
+
+### Option A — OAuth 2.0 (recommended for personal Gmail)
+
+Use this if you want to upload to a normal Google Drive folder in your personal/consumer account.
+
+1. Create OAuth 2.0 credentials in Google Cloud Console.
+2. Download the client secrets JSON.
+3. Place it at a path like `./secrets/oauth-credentials.json`.
+4. Set:
+   ```env
+   GOOGLE_OAUTH_CREDENTIALS_FILE=./secrets/oauth-credentials.json
+   GOOGLE_OAUTH_TOKEN_FILE=./token.json
+   GOOGLE_DRIVE_FOLDER_ID=your-folder-id
+   ```
+5. Run the app once to authorize and generate the token:
+   ```bash
+   ./run.sh --once
+   ```
+   The first run will open a browser/device flow and write `token.json`.
+
+### Option B — Service account + Shared Drive (for Workspace)
+
+Use this if you have Google Workspace and a Shared Drive.
+
+1. Create a service account and download the JSON.
+2. Create a Shared Drive.
+3. Add the service account email as **Content manager**.
+4. Set:
+   ```env
+   GOOGLE_APPLICATION_CREDENTIALS=./secrets/google-service-account.json
+   GOOGLE_SHARED_DRIVE_ID=your-shared-drive-id
+   GOOGLE_DRIVE_FOLDER_ID=folder-id-inside-shared-drive
+   ```
 
 ## Local Development
 
@@ -51,19 +94,13 @@ go run ./cmd/backup --once
 
 For a complete step-by-step run guide, see [How to run.md](How%20to%20run.md).
 
-To generate the Google Drive service-account credentials used by this app, see [How to get Google Credentials.md](How%20to%20get%20Google%20Credentials.md).
-
-## Google Cloud Setup
-
-1. Create a Google Cloud project.
-2. Enable the Google Drive API.
-3. Create a service account.
-4. Download the service account JSON key.
-5. Share the target Google Drive folder with the service account email.
+For Google credential setup, see [How to get Google Credentials.md](How%20to%20get%20Google%20Credentials.md).
 
 ## Google Drive Folder Setup
 
-Create a folder in Google Drive and share it with the service account email. Copy the folder ID from the URL and set it as `GOOGLE_DRIVE_FOLDER_ID`.
+1. Open Google Drive.
+2. For OAuth: create/open the target folder in your normal Drive and copy its ID from the URL.
+3. For Shared Drive: create a Shared Drive, add your service account, then use a folder inside it.
 
 ## Running Locally
 
@@ -82,7 +119,6 @@ WEB_PORT=8080 go run ./cmd/backup
 Then open `http://localhost:8080`.
 
 The dashboard shows:
-
 - current configuration
 - last backup status
 - last uploaded file and size
@@ -114,8 +150,10 @@ docker run --rm mongo-drive-backup --once
 
 - Verify `mongodump` is available inside the container: `docker run --rm <image> mongodump --version`
 - Check container logs in Coolify.
-- Ensure the Google service account has access to the Drive folder.
-- Do not commit `.env` or JSON credentials to Git.
+- For service account uploads, ensure you are using a Shared Drive.
+- For OAuth, make sure `token.json` was generated and is readable.
+- Ensure `BACKUP_TIMEZONE` is a valid Go/ZoneInfo timezone such as `UTC` or `Asia/Dhaka`.
+- Watch the logs for `mongodb_dump_failed`, `drive_upload_failed`, or scheduler errors.
 
 ## Security Notes
 
@@ -123,3 +161,4 @@ docker run --rm mongo-drive-backup --once
 - Never commit production secrets.
 - Use Coolify secrets for sensitive values.
 - Local backup files are deleted after upload.
+- For OAuth, keep `token.json` out of source control.
