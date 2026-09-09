@@ -16,7 +16,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/backup ./cmd/backup
 
 RUN addgroup -g 1000 -S appgroup && \
-    adduser -u 1000 -S appuser -G appgroup
+    adduser -u 1000 -S appuser -G appgroup && \
+    chown -R appuser:appgroup /app
 
 USER appuser
 
