@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -284,7 +286,19 @@ func (o *OAuth2Uploader) newService(ctx context.Context) (*drive.Service, error)
 
 	tok, err := o.tokenFromFile()
 	if err != nil {
-		return nil, fmt.Errorf("load oauth token: %w", err)
+		o.log.Info("oauth_starting_browser_flow", map[string]interface{}{
+			"reason": err.Error(),
+		})
+		tok, err = o.getTokenFromWeb(ctx, config)
+		if err != nil {
+			return nil, fmt.Errorf("oauth web flow failed: %w", err)
+		}
+		if err := o.saveToken(tok); err != nil {
+			return nil, fmt.Errorf("save oauth token: %w", err)
+		}
+		o.log.Info("oauth_token_saved", map[string]interface{}{
+			"file": o.tokenPath,
+		})
 	}
 
 	ts := config.TokenSource(ctx, tok)
@@ -315,6 +329,54 @@ func (o *OAuth2Uploader) tokenFromFile() (*oauth2.Token, error) {
 	}
 
 	return &tok, nil
+}
+
+func (o *OAuth2Uploader) getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	o.log.Info("oauth_auth_url_ready", map[string]interface{}{
+		"url": authURL,
+	})
+
+	if err := openURL(authURL); err != nil {
+		return nil, fmt.Errorf("open browser failed: %w", err)
+	}
+
+	fmt.Printf("Authorize this app at:\n%s\n\nAfter approval, paste the authorization code here:\n", authURL)
+
+	var code string
+	if _, err := fmt.Scan(&code); err != nil {
+		return nil, fmt.Errorf("read authorization code: %w", err)
+	}
+
+	tok, err := config.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("exchange code for token: %w", err)
+	}
+
+	return tok, nil
+}
+
+func (o *OAuth2Uploader) saveToken(tok *oauth2.Token) error {
+	f, err := os.Create(o.tokenPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	return json.NewEncoder(f).Encode(tok)
+}
+
+func openURL(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform; open manually: %s", url)
+	}
 }
 
 type DriveFileInfo struct {
