@@ -4,9 +4,8 @@ This repository is a Go service that periodically creates a MongoDB dump, compre
 
 ## 1. Prerequisites
 
-- Go 1.23+
+- Go 1.26+
 - Docker
-- `mongodump` available in the runtime environment
 - A MongoDB instance reachable through `MONGODB_URI`
 - Google Drive destination folder access:
   - **Option A:** personal Gmail account using OAuth 2.0, or
@@ -80,6 +79,15 @@ The application reads environment variables from the process environment and sta
 
 > **Note:** Local `go run` requires `mongodump` to be installed on your machine. If you don't have it, use the Docker commands in section 5 instead.
 
+### OAuth authorization
+
+If you are using OAuth 2.0 and `token.json` does not exist yet:
+
+- With web UI enabled (`WEB_PORT` set): open the dashboard and click **Authorize Google Drive**
+- Without web UI: the app prints the authorization URL in the logs; complete the flow in a browser
+
+After approval, the token is saved to `token.json` automatically.
+
 ### Run a single backup and exit
 
 ```bash
@@ -146,8 +154,9 @@ The Dockerfile exposes `WEB_PORT` through an `ARG` and `EXPOSE` declaration.
 
 ## 7. Troubleshooting
 
-- Verify that `mongodump` is installed in the runtime image or host.
+- Verify that `mongodump` is available inside the container or on the host.
 - Confirm that the Google account or service account has edit permission for the Google Drive folder.
 - For service accounts, use a Shared Drive; normal My Drive folders will fail with `storageQuotaExceeded`.
+- For OAuth, make sure `token.json` was generated and is readable. If not, use the **Authorize Google Drive** button in the web UI, or check the logs for the authorization URL.
 - Ensure `BACKUP_TIMEZONE` is a valid Go/ZoneInfo timezone such as `UTC` or `Asia/Dhaka`.
 - Watch the logs for `mongodb_dump_failed`, `drive_upload_failed`, or scheduler errors.

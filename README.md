@@ -10,7 +10,6 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 
 ## Requirements
 
-- Go 1.23+
 - Docker
 - MongoDB instance
 - Google Drive destination folder
@@ -64,11 +63,11 @@ Use this if you want to upload to a normal Google Drive folder in your personal/
    GOOGLE_OAUTH_TOKEN_JSON={"access_token":"...","refresh_token":"...","token_type":"Bearer"}
    ```
    Or use both: file path for credentials, inline JSON for token.
-6. Run the app once to authorize and generate the token:
-   ```bash
-   ./run.sh --once
-   ```
-   The first run will open a browser/device flow and write `token.json`, or you can paste the resulting token into `GOOGLE_OAUTH_TOKEN_JSON` for Coolify.
+6. Start the app and authorize it:
+   - With web UI (`WEB_PORT` set): open the dashboard and click **Authorize Google Drive**
+   - Without web UI: the app prints the authorization URL in the logs; complete the flow in a browser
+
+   After approval, the token is saved to `token.json` automatically.
 
 ### Option B — Service account + Shared Drive (for Workspace)
 
@@ -161,7 +160,7 @@ The Dockerfile includes:
 - Single-stage self-contained build — no Go or `mongodump` required on the host
 - `mongodump` installed via Alpine packages
 - Healthcheck on `/healthz`
-- OAuth preflight flow before backups start
+- Web UI with manual **Authorize Google Drive** button for OAuth
 - Non-root runtime user
 
 ## Troubleshooting
@@ -169,7 +168,7 @@ The Dockerfile includes:
 - Verify `mongodump` is available inside the container: `docker run --rm <image> mongodump --version`
 - Check container logs in Coolify.
 - For service account uploads, ensure you are using a Shared Drive.
-- For OAuth, make sure `token.json` was generated and is readable.
+- For OAuth, make sure `token.json` was generated and is readable. If not, use the **Authorize Google Drive** button in the web UI, or check the logs for the authorization URL.
 - Ensure `BACKUP_TIMEZONE` is a valid Go/ZoneInfo timezone such as `UTC` or `Asia/Dhaka`.
 - Watch the logs for `mongodb_dump_failed`, `drive_upload_failed`, or scheduler errors.
 
