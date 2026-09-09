@@ -40,6 +40,7 @@ type Server struct {
 	lastRunTime time.Time
 	oauthCodeCh chan string
 	stopCh      chan struct{}
+	restartCh   chan struct{}
 	logs        []logger.Entry
 	logsMu      sync.RWMutex
 	listBackups func() ([]*driveapi.File, error)
@@ -55,6 +56,7 @@ func NewServer(port string, log *logger.Logger) *Server {
 		triggerCh:   make(chan struct{}, 1),
 		oauthCodeCh: make(chan string, 1),
 		stopCh:      make(chan struct{}),
+		restartCh:   make(chan struct{}),
 		logs:        make([]logger.Entry, 0, 200),
 		status: Status{
 			Environment: "production",
@@ -116,6 +118,10 @@ func (s *Server) StopCh() <-chan struct{} {
 	return s.stopCh
 }
 
+func (s *Server) RestartCh() <-chan struct{} {
+	return s.restartCh
+}
+
 func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	s.lastRunMu.Lock()
 	defer s.lastRunMu.Unlock()
@@ -158,6 +164,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/backup/now", s.handleBackupNow)
 	mux.HandleFunc("/api/stop", s.handleStop)
+	mux.HandleFunc("/api/restart", s.handleRestart)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/backups", s.handleBackups)
 	mux.HandleFunc("/api/oauth/start", s.handleOAuthStart)
@@ -234,8 +241,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       <button id="runNow" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium">
         Run Backup Now
       </button>
-      <button id="stopNow" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-medium">
-        Stop Service
+      <button id="restartNow" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg font-medium">
+        Restart Service
       </button>
       <button id="authorizeDrive" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium">
         Authorize Google Drive
@@ -309,12 +316,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       }
     });
 
-    document.getElementById('stopNow').addEventListener('click', async () => {
+    document.getElementById('restartNow').addEventListener('click', async () => {
       const msg = document.getElementById('message');
-      msg.textContent = 'Stopping...';
-      const res = await fetch('/api/stop', { method: 'POST' });
+      msg.textContent = 'Restarting...';
+      const res = await fetch('/api/restart', { method: 'POST' });
       if (res.status === 202) {
-        msg.textContent = 'Stop signal sent';
+        msg.textContent = 'Restart signal sent';
       } else {
         msg.textContent = 'Failed: ' + (await res.text());
       }
@@ -455,6 +462,21 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("already stopping"))
+	}
+}
+
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	select {
+	case s.restartCh <- struct{}{}:
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("restart signal sent"))
+	default:
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("already restarting"))
 	}
 }
 

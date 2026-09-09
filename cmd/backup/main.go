@@ -194,16 +194,7 @@ func main() {
 		return runBackup(ctx, cfg, log, webSrv, uploader)
 	}
 
-	sched, err := scheduler.New(cfg.BackupSchedule, cfg.BackupTimezone, backupJob, log)
-	if err != nil {
-		log.Error("scheduler_init_failed", map[string]interface{}{
-			"error": err.Error(),
-		})
-		os.Exit(1)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	if webSrv != nil {
 		go func() {
@@ -227,12 +218,31 @@ func main() {
 		}()
 
 		go func() {
-			<-webSrv.StopCh()
-			log.Info("service_stop_requested", nil)
-			cancel()
+			for {
+				select {
+				case <-webSrv.StopCh():
+					log.Info("service_stop_requested", nil)
+					cancel()
+					return
+				case <-webSrv.RestartCh():
+					log.Info("service_restart_requested", nil)
+					cancel()
+					time.Sleep(500 * time.Millisecond)
+					ctx, cancel = context.WithCancel(context.Background())
+					go runService(ctx, cfg, log, webSrv, uploader, oauthHandler, once)
+				}
+			}
 		}()
 	}
 
+	go runService(ctx, cfg, log, webSrv, uploader, oauthHandler, once)
+
+	<-ctx.Done()
+}
+
+func runService(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server, uploader interface {
+	Upload(ctx context.Context, path, filename string) (string, int64, error)
+}, oauthHandler *drive.OAuth2Uploader, once bool) {
 	if err := ensureOAuthIfNeeded(ctx, cfg, log, webSrv, oauthHandler); err != nil {
 		log.Error("oauth_setup_failed", map[string]interface{}{
 			"error": err.Error(),
@@ -240,16 +250,29 @@ func main() {
 		if webSrv == nil {
 			os.Exit(1)
 		}
+		return
+	}
+
+	backupJob := func(ctx context.Context) error {
+		return runBackup(ctx, cfg, log, webSrv, uploader)
 	}
 
 	if once {
-		if err := sched.RunOnce(ctx); err != nil {
+		if err := backupJob(ctx); err != nil {
 			log.Error("backup_failed", map[string]interface{}{
 				"error": err.Error(),
 			})
 			os.Exit(1)
 		}
 		return
+	}
+
+	sched, err := scheduler.New(cfg.BackupSchedule, cfg.BackupTimezone, backupJob, log)
+	if err != nil {
+		log.Error("scheduler_init_failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		os.Exit(1)
 	}
 
 	if err := sched.Start(ctx); err != nil {
