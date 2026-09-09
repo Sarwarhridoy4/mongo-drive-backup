@@ -174,7 +174,10 @@ func main() {
 			}
 		}
 		if webSrv != nil {
-			callbackURL := fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
+			callbackURL := cfg.OAuthCallbackURL
+			if callbackURL == "" {
+				callbackURL = fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
+			}
 			uploader = oauthHandler.WithCallbackURL(callbackURL, webSrv.OAuthCodeCh())
 			webSrv.SetOAuthHandler(oauthHandler)
 		} else {
@@ -267,7 +270,10 @@ func ensureOAuthIfNeeded(ctx context.Context, cfg *config.Config, log *logger.Lo
 	})
 
 	if webSrv != nil {
-		callbackURL := fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
+		callbackURL := cfg.OAuthCallbackURL
+		if callbackURL == "" {
+			callbackURL = fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
+		}
 		baseUploader.WithCallbackURL(callbackURL, webSrv.OAuthCodeCh())
 	}
 

@@ -21,6 +21,7 @@ type Config struct {
 	OAuthCredentialsJSON string
 	OAuthTokenFile       string
 	OAuthTokenJSON       string
+	OAuthCallbackURL     string
 	RetentionDays        int
 	TempBackupDir        string
 	RunOnStart           bool
@@ -41,6 +42,7 @@ func Load() (*Config, error) {
 		OAuthCredentialsJSON: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_JSON"),
 		OAuthTokenFile:       getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "./token.json"),
 		OAuthTokenJSON:       os.Getenv("GOOGLE_OAUTH_TOKEN_JSON"),
+		OAuthCallbackURL:     os.Getenv("GOOGLE_OAUTH_CALLBACK_URL"),
 		TempBackupDir:        getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
 		RunOnStart:           getEnvBool("RUN_BACKUP_ON_START", false),
 		WebPort:              getEnvOrDefault("WEB_PORT", ""),

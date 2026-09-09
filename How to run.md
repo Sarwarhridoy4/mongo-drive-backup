@@ -37,6 +37,7 @@ TEMP_BACKUP_DIR=/tmp/mongodb-backups
 RUN_BACKUP_ON_START=false
 WEB_PORT=
 MONGODUMP_PATH=
+GOOGLE_OAUTH_CALLBACK_URL=
 ```
 
 For service account + Shared Drive:
@@ -158,5 +159,6 @@ The Dockerfile exposes `WEB_PORT` through an `ARG` and `EXPOSE` declaration.
 - Confirm that the Google account or service account has edit permission for the Google Drive folder.
 - For service accounts, use a Shared Drive; normal My Drive folders will fail with `storageQuotaExceeded`.
 - For OAuth, make sure `token.json` was generated and is readable. If not, use the **Authorize Google Drive** button in the web UI, or check the logs for the authorization URL.
+- If the OAuth callback shows `localhost` in the browser, set `GOOGLE_OAUTH_CALLBACK_URL` to your public Coolify URL, and add that same URL to your authorized redirect URIs in Google Cloud Console.
 - Ensure `BACKUP_TIMEZONE` is a valid Go/ZoneInfo timezone such as `UTC` or `Asia/Dhaka`.
 - Watch the logs for `mongodb_dump_failed`, `drive_upload_failed`, or scheduler errors.

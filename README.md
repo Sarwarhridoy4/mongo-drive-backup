@@ -32,6 +32,7 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 | `GOOGLE_OAUTH_CREDENTIALS_JSON` | OAuth client credentials JSON inline    | Optional               |
 | `GOOGLE_OAUTH_TOKEN_FILE`     | OAuth token file path                    | `./token.json`         |
 | `GOOGLE_OAUTH_TOKEN_JSON`     | OAuth token JSON inline                  | Optional               |
+| `GOOGLE_OAUTH_CALLBACK_URL`   | Public OAuth callback URL                | Optional               |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path        | Optional               |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON inline              | Optional               |
 | `BACKUP_RETENTION_DAYS`       | Retention in days                        | `30`                   |
@@ -63,6 +64,12 @@ Use this if you want to upload to a normal Google Drive folder in your personal/
    GOOGLE_OAUTH_TOKEN_JSON={"access_token":"...","refresh_token":"...","token_type":"Bearer"}
    ```
    Or use both: file path for credentials, inline JSON for token.
+
+   For Coolify or production, also set:
+   ```env
+   GOOGLE_OAUTH_CALLBACK_URL=https://your-domain.com/oauth2callback
+   ```
+   Make sure this URL is also added to your authorized redirect URIs in Google Cloud Console.
 6. Start the app and authorize it:
    - With web UI (`WEB_PORT` set): open the dashboard and click **Authorize Google Drive**
    - Without web UI: the app prints the authorization URL in the logs; complete the flow in a browser
