@@ -18,7 +18,9 @@ type Config struct {
 	SharedDriveID        string
 	ServiceAccountJSON   string
 	OAuthCredentialsFile string
+	OAuthCredentialsJSON string
 	OAuthTokenFile       string
+	OAuthTokenJSON       string
 	RetentionDays        int
 	TempBackupDir        string
 	RunOnStart           bool
@@ -36,7 +38,9 @@ func Load() (*Config, error) {
 		SharedDriveID:        os.Getenv("GOOGLE_SHARED_DRIVE_ID"),
 		ServiceAccountJSON:   os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
 		OAuthCredentialsFile: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_FILE"),
+		OAuthCredentialsJSON: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_JSON"),
 		OAuthTokenFile:       getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "./token.json"),
+		OAuthTokenJSON:       os.Getenv("GOOGLE_OAUTH_TOKEN_JSON"),
 		TempBackupDir:        getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
 		RunOnStart:           getEnvBool("RUN_BACKUP_ON_START", false),
 		WebPort:              getEnvOrDefault("WEB_PORT", ""),
@@ -79,8 +83,8 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.DriveFolderID) == "" {
 		missing = append(missing, "GOOGLE_DRIVE_FOLDER_ID")
 	}
-	if strings.TrimSpace(c.ServiceAccountJSON) == "" && strings.TrimSpace(c.OAuthCredentialsFile) == "" {
-		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_APPLICATION_CREDENTIALS, or GOOGLE_OAUTH_CREDENTIALS_FILE")
+	if strings.TrimSpace(c.ServiceAccountJSON) == "" && strings.TrimSpace(c.OAuthCredentialsFile) == "" && strings.TrimSpace(c.OAuthCredentialsJSON) == "" {
+		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_OAUTH_CREDENTIALS_FILE, or GOOGLE_OAUTH_CREDENTIALS_JSON")
 	}
 
 	if len(missing) > 0 {

@@ -30,7 +30,9 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 | `GOOGLE_DRIVE_FOLDER_ID`      | Target Drive folder ID                   | Required               |
 | `GOOGLE_SHARED_DRIVE_ID`      | Shared Drive ID                          | Optional               |
 | `GOOGLE_OAUTH_CREDENTIALS_FILE` | OAuth client credentials JSON path      | Optional               |
+| `GOOGLE_OAUTH_CREDENTIALS_JSON` | OAuth client credentials JSON inline    | Optional               |
 | `GOOGLE_OAUTH_TOKEN_FILE`     | OAuth token file path                    | `./token.json`         |
+| `GOOGLE_OAUTH_TOKEN_JSON`     | OAuth token JSON inline                  | Optional               |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path        | Optional               |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON inline              | Optional               |
 | `BACKUP_RETENTION_DAYS`       | Retention in days                        | `30`                   |
@@ -49,18 +51,24 @@ Use this if you want to upload to a normal Google Drive folder in your personal/
 
 1. Create OAuth 2.0 credentials in Google Cloud Console.
 2. Download the client secrets JSON.
-3. Place it at a path like `./secrets/oauth-credentials.json`.
-4. Set:
+3. For local development, place it at a path like `./secrets/oauth-credentials.json`.
+4. For Coolify/deployments without file mounts, paste the JSON into an environment variable.
+5. Set one of:
    ```env
+   # File path (local development)
    GOOGLE_OAUTH_CREDENTIALS_FILE=./secrets/oauth-credentials.json
    GOOGLE_OAUTH_TOKEN_FILE=./token.json
-   GOOGLE_DRIVE_FOLDER_ID=your-folder-id
+
+   # Inline JSON (Coolify / deployments)
+   GOOGLE_OAUTH_CREDENTIALS_JSON={"installed":{...}}
+   GOOGLE_OAUTH_TOKEN_JSON={"access_token":"...","refresh_token":"...","token_type":"Bearer"}
    ```
-5. Run the app once to authorize and generate the token:
+   Or use both: file path for credentials, inline JSON for token.
+6. Run the app once to authorize and generate the token:
    ```bash
    ./run.sh --once
    ```
-   The first run will open a browser/device flow and write `token.json`.
+   The first run will open a browser/device flow and write `token.json`, or you can paste the resulting token into `GOOGLE_OAUTH_TOKEN_JSON` for Coolify.
 
 ### Option B — Service account + Shared Drive (for Workspace)
 

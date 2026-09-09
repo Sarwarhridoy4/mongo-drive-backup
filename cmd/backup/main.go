@@ -50,12 +50,20 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 		} else {
 			uploader = drive.NewUploader(cfg.DriveFolderID, []byte(cfg.ServiceAccountJSON), log)
 		}
-	} else if cfg.OAuthCredentialsFile != "" {
+	} else if cfg.OAuthCredentialsFile != "" || cfg.OAuthCredentialsJSON != "" {
 		var baseUploader *drive.OAuth2Uploader
-		if cfg.SharedDriveID != "" {
-			baseUploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		if cfg.OAuthCredentialsJSON != "" {
+			if cfg.SharedDriveID != "" {
+				baseUploader = drive.NewOAuth2UploaderWithSharedDriveInline(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+			} else {
+				baseUploader = drive.NewOAuth2UploaderWithInline(cfg.DriveFolderID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+			}
 		} else {
-			baseUploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+			if cfg.SharedDriveID != "" {
+				baseUploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+			} else {
+				baseUploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+			}
 		}
 		if webSrv != nil {
 			callbackURL := fmt.Sprintf("http://localhost:%s/oauth2callback", cfg.WebPort)
@@ -239,7 +247,7 @@ func main() {
 }
 
 func ensureOAuthIfNeeded(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server) error {
-	if cfg.ServiceAccountJSON != "" || cfg.OAuthCredentialsFile == "" {
+	if cfg.ServiceAccountJSON != "" || cfg.OAuthCredentialsFile == "" && cfg.OAuthCredentialsJSON == "" {
 		return nil
 	}
 
@@ -248,10 +256,18 @@ func ensureOAuthIfNeeded(ctx context.Context, cfg *config.Config, log *logger.Lo
 	})
 
 	var baseUploader *drive.OAuth2Uploader
-	if cfg.SharedDriveID != "" {
-		baseUploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+	if cfg.OAuthCredentialsJSON != "" {
+		if cfg.SharedDriveID != "" {
+			baseUploader = drive.NewOAuth2UploaderWithSharedDriveInline(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+		} else {
+			baseUploader = drive.NewOAuth2UploaderWithInline(cfg.DriveFolderID, cfg.OAuthCredentialsJSON, cfg.OAuthTokenJSON, log)
+		}
 	} else {
-		baseUploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		if cfg.SharedDriveID != "" {
+			baseUploader = drive.NewOAuth2UploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		} else {
+			baseUploader = drive.NewOAuth2Uploader(cfg.DriveFolderID, cfg.OAuthCredentialsFile, cfg.OAuthTokenFile, log)
+		}
 	}
 
 	if webSrv != nil {
