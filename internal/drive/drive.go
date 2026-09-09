@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"runtime"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -401,7 +399,7 @@ func (o *OAuth2Uploader) TokenFromFile() (*oauth2.Token, error) {
 }
 
 func (o *OAuth2Uploader) GetTokenFromWeb(ctx context.Context) (*oauth2.Token, error) {
-	config, err := o.parseOAuthConfig(ctx)
+	config, err := o.parseOAuthConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +410,7 @@ func (o *OAuth2Uploader) GetTokenFromWeb(ctx context.Context) (*oauth2.Token, er
 }
 
 func (o *OAuth2Uploader) GetAuthURL(ctx context.Context) (string, *oauth2.Config, error) {
-	config, err := o.parseOAuthConfig(ctx)
+	config, err := o.parseOAuthConfig()
 	if err != nil {
 		return "", nil, err
 	}
@@ -426,7 +424,7 @@ func (o *OAuth2Uploader) GetAuthURL(ctx context.Context) (string, *oauth2.Config
 	return url, config, nil
 }
 
-func (o *OAuth2Uploader) parseOAuthConfig(ctx context.Context) (*oauth2.Config, error) {
+func (o *OAuth2Uploader) parseOAuthConfig() (*oauth2.Config, error) {
 	if o.credsJSON != "" {
 		return google.ConfigFromJSON([]byte(o.credsJSON), drive.DriveFileScope)
 	}
@@ -464,19 +462,6 @@ func (o *OAuth2Uploader) WaitForToken(ctx context.Context, config *oauth2.Config
 	}
 
 	return tok, nil
-}
-
-func openURL(url string) error {
-	switch runtime.GOOS {
-	case "linux":
-		return exec.Command("xdg-open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		return exec.Command("open", url).Start()
-	default:
-		return fmt.Errorf("unsupported platform; open manually: %s", url)
-	}
 }
 
 type DriveFileInfo struct {
