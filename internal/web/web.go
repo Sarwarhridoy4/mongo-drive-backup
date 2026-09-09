@@ -1,14 +1,17 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
-	"google.golang.org/api/drive/v3"
+	"golang.org/x/oauth2"
+	driveapi "google.golang.org/api/drive/v3"
 
+	"github.com/sarwar/mongo-drive-backup/internal/drive"
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
 )
 
@@ -39,7 +42,10 @@ type Server struct {
 	stopCh      chan struct{}
 	logs        []logger.Entry
 	logsMu      sync.RWMutex
-	listBackups func() ([]*drive.File, error)
+	listBackups func() ([]*driveapi.File, error)
+	oauthHandler *drive.OAuth2Uploader
+	oauthAuthURL string
+	oauthMu     sync.RWMutex
 }
 
 func NewServer(port string, log *logger.Logger) *Server {
@@ -70,10 +76,26 @@ func (s *Server) appendLog(entry logger.Entry) {
 	}
 }
 
-func (s *Server) SetListBackups(fn func() ([]*drive.File, error)) {
+func (s *Server) SetListBackups(fn func() ([]*driveapi.File, error)) {
 	s.logsMu.Lock()
 	defer s.logsMu.Unlock()
 	s.listBackups = fn
+}
+
+func (s *Server) SetOAuthHandler(handler *drive.OAuth2Uploader) {
+	s.oauthHandler = handler
+}
+
+func (s *Server) SetOAuthAuthURL(url string) {
+	s.oauthMu.Lock()
+	defer s.oauthMu.Unlock()
+	s.oauthAuthURL = url
+}
+
+func (s *Server) OAuthAuthURL() string {
+	s.oauthMu.RLock()
+	defer s.oauthMu.RUnlock()
+	return s.oauthAuthURL
 }
 
 func (s *Server) SetConfig(cfgStatus Status) {
@@ -138,6 +160,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/backups", s.handleBackups)
+	mux.HandleFunc("/api/oauth/start", s.handleOAuthStart)
 	mux.HandleFunc("/oauth2callback", s.handleOAuth2Callback)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -213,6 +236,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       </button>
       <button id="stopNow" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-medium">
         Stop Service
+      </button>
+      <button id="authorizeDrive" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium">
+        Authorize Google Drive
       </button>
       <span id="message" class="text-sm text-slate-400"></span>
     </div>
@@ -294,6 +320,23 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       }
     });
 
+    document.getElementById('authorizeDrive').addEventListener('click', async () => {
+      const msg = document.getElementById('message');
+      msg.textContent = 'Starting authorization...';
+      try {
+        const res = await fetch('/api/oauth/start', { method: 'POST' });
+        if (res.status === 200) {
+          const data = await res.json();
+          msg.textContent = 'Opening authorization page...';
+          window.open(data.url, '_blank');
+        } else {
+          msg.textContent = 'Failed: ' + (await res.text());
+        }
+      } catch (err) {
+        msg.textContent = 'Error: ' + err.message;
+      }
+    });
+
     loadStatus();
     loadLogs();
     loadBackups();
@@ -355,6 +398,49 @@ func (s *Server) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("oauth callback not ready"))
 	}
+}
+
+func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.oauthHandler == nil {
+		http.Error(w, "oauth not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	url, config, err := s.oauthHandler.GetAuthURL(r.Context())
+	if err != nil {
+		s.log.Error("oauth_auth_url_failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		http.Error(w, "failed to generate auth url", http.StatusInternalServerError)
+		return
+	}
+
+	s.SetOAuthAuthURL(url)
+
+	go func(ctx context.Context, cfg *oauth2.Config) {
+		tok, err := s.oauthHandler.WaitForToken(ctx, cfg)
+		if err != nil {
+			s.log.Error("oauth_token_exchange_failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+		if err := s.oauthHandler.SaveToken(tok); err != nil {
+			s.log.Error("oauth_token_save_failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+	s.log.Info("oauth_token_saved_via_ui", nil)
+	}(r.Context(), config)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
