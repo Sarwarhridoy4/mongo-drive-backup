@@ -13,6 +13,7 @@ import (
 	"github.com/sarwar/mongo-drive-backup/internal/scheduler"
 	"github.com/sarwar/mongo-drive-backup/internal/web"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/pflag"
 )
 
@@ -35,7 +36,12 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 
 	mongoDumper := backup.NewMongoDumper(cfg.MongoURI, cfg.MongoDatabase, tempDir, log)
 	archiver := backup.NewArchiver(tempDir, log)
-	uploader := drive.NewUploader(cfg.DriveFolderID, []byte(cfg.ServiceAccountJSON), log)
+	var uploader *drive.Uploader
+	if cfg.SharedDriveID != "" {
+		uploader = drive.NewUploaderWithSharedDrive(cfg.DriveFolderID, cfg.SharedDriveID, []byte(cfg.ServiceAccountJSON), log)
+	} else {
+		uploader = drive.NewUploader(cfg.DriveFolderID, []byte(cfg.ServiceAccountJSON), log)
+	}
 
 	dumpDir, err := mongoDumper.Dump(ctx)
 	if err != nil {
@@ -101,6 +107,8 @@ func main() {
 
 	pflag.BoolVarP(&once, "once", "o", false, "Run a single backup and exit")
 	pflag.Parse()
+
+	_ = godotenv.Load()
 
 	cfg, err := config.Load()
 	if err != nil {

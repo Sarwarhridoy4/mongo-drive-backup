@@ -15,6 +15,7 @@ type Config struct {
 	BackupSchedule     string
 	BackupTimezone     string
 	DriveFolderID      string
+	SharedDriveID      string
 	ServiceAccountJSON string
 	RetentionDays      int
 	TempBackupDir      string
@@ -30,10 +31,21 @@ func Load() (*Config, error) {
 		BackupSchedule:     getEnvOrDefault("BACKUP_SCHEDULE", "0 2 * * *"),
 		BackupTimezone:     getEnvOrDefault("BACKUP_TIMEZONE", "UTC"),
 		DriveFolderID:      os.Getenv("GOOGLE_DRIVE_FOLDER_ID"),
+		SharedDriveID:      os.Getenv("GOOGLE_SHARED_DRIVE_ID"),
 		ServiceAccountJSON: os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
 		TempBackupDir:      getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
 		RunOnStart:         getEnvBool("RUN_BACKUP_ON_START", false),
 		WebPort:            getEnvOrDefault("WEB_PORT", ""),
+	}
+
+	if strings.TrimSpace(cfg.ServiceAccountJSON) == "" {
+		if credsPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); credsPath != "" {
+			data, err := os.ReadFile(credsPath)
+			if err != nil {
+				return nil, fmt.Errorf("read google application credentials: %w", err)
+			}
+			cfg.ServiceAccountJSON = string(data)
+		}
 	}
 
 	if v := os.Getenv("BACKUP_RETENTION_DAYS"); v != "" {
@@ -64,7 +76,7 @@ func (c *Config) Validate() error {
 		missing = append(missing, "GOOGLE_DRIVE_FOLDER_ID")
 	}
 	if strings.TrimSpace(c.ServiceAccountJSON) == "" {
-		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON")
+		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS")
 	}
 
 	if len(missing) > 0 {

@@ -28,11 +28,13 @@ MONGODB_DATABASE=mydatabase
 BACKUP_SCHEDULE=0 2 * * *
 BACKUP_TIMEZONE=Asia/Dhaka
 GOOGLE_DRIVE_FOLDER_ID=your-folder-id
+GOOGLE_SHARED_DRIVE_ID=your-shared-drive-id
 GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account", ...}
 BACKUP_RETENTION_DAYS=30
 TEMP_BACKUP_DIR=/tmp/mongodb-backups
 RUN_BACKUP_ON_START=false
 WEB_PORT=
+MONGODUMP_PATH=
 ```
 
 The service validates the required variables:
@@ -51,6 +53,8 @@ go mod download
 ## 4. Run locally
 
 The application reads environment variables from the process environment and starts the scheduler defined by `BACKUP_SCHEDULE`.
+
+> **Note:** Local `go run` requires `mongodump` to be installed on your machine. If you don't have it, use the Docker commands in section 5 instead.
 
 ### Run a single backup and exit
 

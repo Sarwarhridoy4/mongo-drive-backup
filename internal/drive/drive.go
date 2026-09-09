@@ -14,9 +14,10 @@ import (
 )
 
 type Uploader struct {
-	folderID string
-	creds    []byte
-	log      *logger.Logger
+	folderID      string
+	sharedDriveID string
+	creds         []byte
+	log           *logger.Logger
 }
 
 func NewUploader(folderID string, creds []byte, log *logger.Logger) *Uploader {
@@ -24,6 +25,15 @@ func NewUploader(folderID string, creds []byte, log *logger.Logger) *Uploader {
 		folderID: folderID,
 		creds:    creds,
 		log:      log,
+	}
+}
+
+func NewUploaderWithSharedDrive(folderID, sharedDriveID string, creds []byte, log *logger.Logger) *Uploader {
+	return &Uploader{
+		folderID:      folderID,
+		sharedDriveID: sharedDriveID,
+		creds:         creds,
+		log:           log,
 	}
 }
 
@@ -55,7 +65,11 @@ func (u *Uploader) Upload(ctx context.Context, path, filename string) (string, i
 		Parents: []string{u.folderID},
 	}
 
-	created, err := service.Files.Create(driveFile).Media(f).Context(ctx).Do()
+	call := service.Files.Create(driveFile).Media(f).Context(ctx)
+	if u.sharedDriveID != "" {
+		call = call.SupportsAllDrives(true)
+	}
+	created, err := call.Do()
 	if err != nil {
 		return "", 0, fmt.Errorf("drive upload failed: %w", err)
 	}
@@ -83,6 +97,9 @@ func (u *Uploader) ListFiles(ctx context.Context) ([]*drive.File, error) {
 
 	query := fmt.Sprintf("'%s' in parents and trashed = false", u.folderID)
 	call := service.Files.List().Q(query).Fields("files(id,name,createdTime,size)")
+	if u.sharedDriveID != "" {
+		call = call.SupportsAllDrives(true).IncludeItemsFromAllDrives(true)
+	}
 	var files []*drive.File
 	err = call.Pages(ctx, func(page *drive.FileList) error {
 		files = append(files, page.Files...)
@@ -102,7 +119,11 @@ func (u *Uploader) DeleteFile(ctx context.Context, fileID string) error {
 		return fmt.Errorf("create drive service: %w", err)
 	}
 
-	if err := service.Files.Delete(fileID).Context(ctx).Do(); err != nil {
+	deleteCall := service.Files.Delete(fileID).Context(ctx)
+	if u.sharedDriveID != "" {
+		deleteCall = deleteCall.SupportsAllDrives(true)
+	}
+	if err := deleteCall.Do(); err != nil {
 		return fmt.Errorf("delete drive file: %w", err)
 	}
 

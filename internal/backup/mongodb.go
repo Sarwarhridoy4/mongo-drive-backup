@@ -6,24 +6,31 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
 )
 
 type MongoDumper struct {
-	uri      string
-	database string
-	outDir   string
-	log      *logger.Logger
+	uri       string
+	database  string
+	outDir    string
+	mongodump string
+	log       *logger.Logger
 }
 
 func NewMongoDumper(uri, database, outDir string, log *logger.Logger) *MongoDumper {
+	mongodump := os.Getenv("MONGODUMP_PATH")
+	if mongodump == "" {
+		mongodump = "mongodump"
+	}
 	return &MongoDumper{
-		uri:      uri,
-		database: database,
-		outDir:   outDir,
-		log:      log,
+		uri:       uri,
+		database:  database,
+		outDir:    outDir,
+		mongodump: mongodump,
+		log:       log,
 	}
 }
 
@@ -35,24 +42,26 @@ func (m *MongoDumper) Dump(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create dump dir: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "mongodump",
-		"--uri="+m.uri,
-		"--db="+m.database,
-		"--out="+dumpDir,
-	)
+	cmdArgs := []string{
+		"--uri=" + m.uri,
+		"--db=" + m.database,
+		"--out=" + dumpDir,
+	}
 
 	m.log.Info("mongodb_dump_started", map[string]interface{}{
 		"database": m.database,
 		"out":      dumpDir,
+		"command":  m.mongodump,
 	})
 
+	cmd := exec.CommandContext(ctx, m.mongodump, cmdArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		_ = os.RemoveAll(dumpDir)
 		m.log.Error("mongodb_dump_failed", map[string]interface{}{
-			"error": string(output),
+			"error": strings.TrimSpace(string(output)),
 		})
-		return "", fmt.Errorf("mongodump failed: %w: %s", err, string(output))
+		return "", fmt.Errorf("mongodump failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	m.log.Info("mongodb_dump_completed", map[string]interface{}{

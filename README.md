@@ -25,11 +25,13 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 | `BACKUP_SCHEDULE`             | Cron schedule             | `0 2 * * *`            |
 | `BACKUP_TIMEZONE`             | Schedule timezone         | `UTC`                  |
 | `GOOGLE_DRIVE_FOLDER_ID`      | Target Drive folder       | Required               |
+| `GOOGLE_SHARED_DRIVE_ID`      | Shared Drive ID           | Optional               |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON      | Required               |
 | `BACKUP_RETENTION_DAYS`       | Retention in days         | `30`                   |
 | `TEMP_BACKUP_DIR`             | Temp directory            | `/tmp/mongodb-backups` |
 | `RUN_BACKUP_ON_START`         | Run backup on startup     | `false`                |
 | `WEB_PORT`                    | Web UI port, e.g. `8080`  | Optional               |
+| `MONGODUMP_PATH`              | Full path to `mongodump`  | Optional               |
 
 ## Local Development
 
@@ -40,6 +42,12 @@ cp .env.example .env
 go mod download
 go run ./cmd/backup --once
 ```
+
+> Local `go run` requires `mongodump` to be installed on your machine. If you don't have it, use Docker instead:
+> ```bash
+> docker build -t mongo-drive-backup .
+> docker run --rm --env-file .env mongo-drive-backup --once
+> ```
 
 For a complete step-by-step run guide, see [How to run.md](How%20to%20run.md).
 
