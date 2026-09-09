@@ -26,7 +26,13 @@ USER appuser
 
 WORKDIR /app
 
-ARG WEB_PORT=8080
-EXPOSE ${WEB_PORT}
+LABEL org.opencontainers.image.title="mongo-drive-backup" \
+      org.opencontainers.image.description="MongoDB Google Drive Backup Service" \
+      org.opencontainers.image.source="https://github.com/Sarwarhridoy4/mongo-drive-backup"
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:${WEB_PORT:-8080}/healthz || exit 1
+
+EXPOSE ${WEB_PORT:-8080}
 
 ENTRYPOINT ["/app/backup"]
