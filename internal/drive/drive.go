@@ -425,7 +425,7 @@ func (o *OAuth2Uploader) GetAuthURL(ctx context.Context) (string, *oauth2.Config
 	if o.callbackURL != "" {
 		config.RedirectURL = o.callbackURL
 	}
-	url := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	url := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 	o.log.Info("oauth_auth_url_ready", map[string]interface{}{
 		"url": url,
 	})
@@ -457,7 +457,7 @@ func (o *OAuth2Uploader) WaitForToken(ctx context.Context, config *oauth2.Config
 			return nil, ctx.Err()
 		}
 	} else {
-		authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+		authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 		fmt.Printf("Authorize this app at:\n%s\n\nAfter approval, paste the authorization code here:\n", authURL)
 		if _, err := fmt.Scan(&code); err != nil {
 			return nil, fmt.Errorf("read authorization code: %w", err)
