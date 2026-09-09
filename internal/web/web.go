@@ -436,8 +436,8 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-	s.log.Info("oauth_token_saved_via_ui", nil)
-	}(r.Context(), config)
+		s.log.Info("oauth_token_saved_via_ui", nil)
+	}(context.Background(), config)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": url})

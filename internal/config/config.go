@@ -40,7 +40,7 @@ func Load() (*Config, error) {
 		ServiceAccountJSON:   os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
 		OAuthCredentialsFile: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_FILE"),
 		OAuthCredentialsJSON: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_JSON"),
-		OAuthTokenFile:       getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "./token.json"),
+		OAuthTokenFile:       getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "/tmp/token.json"),
 		OAuthTokenJSON:       os.Getenv("GOOGLE_OAUTH_TOKEN_JSON"),
 		OAuthCallbackURL:     os.Getenv("GOOGLE_OAUTH_CALLBACK_URL"),
 		TempBackupDir:        getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
