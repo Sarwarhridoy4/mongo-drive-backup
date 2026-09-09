@@ -30,7 +30,7 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 | `GOOGLE_SHARED_DRIVE_ID`      | Shared Drive ID                          | Optional               |
 | `GOOGLE_OAUTH_CREDENTIALS_FILE` | OAuth client credentials JSON path      | Optional               |
 | `GOOGLE_OAUTH_CREDENTIALS_JSON` | OAuth client credentials JSON inline    | Optional               |
-| `GOOGLE_OAUTH_TOKEN_FILE`     | OAuth token file path                    | `/tmp/token.json`       |
+| `GOOGLE_OAUTH_TOKEN_FILE`     | OAuth token file path                    | `./token.json`         |
 | `GOOGLE_OAUTH_TOKEN_JSON`     | OAuth token JSON inline                  | Optional               |
 | `GOOGLE_OAUTH_CALLBACK_URL`   | Public OAuth callback URL                | Optional               |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path        | Optional               |

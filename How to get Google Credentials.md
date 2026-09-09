@@ -69,7 +69,7 @@ Set these environment variables:
 
 ```env
 GOOGLE_OAUTH_CREDENTIALS_FILE=./secrets/oauth-credentials.json
-GOOGLE_OAUTH_TOKEN_FILE=/tmp/token.json
+GOOGLE_OAUTH_TOKEN_FILE=./token.json
 GOOGLE_DRIVE_FOLDER_ID=your-folder-id
 ```
 
@@ -87,7 +87,7 @@ The first run performs the OAuth flow, generates `token.json`, and then proceeds
 - `token.json` contains a long-lived refresh token; treat it like a password.
 - Use `.gitignore` to exclude secret files.
 - If the token stops working, delete `token.json` and re-authorize by running the app again.
-- In Docker/Coolify, the default token path is `/tmp/token.json`. If you need persistence, mount a volume to `/tmp` or set `GOOGLE_OAUTH_TOKEN_FILE` to a writable path.
+- In Docker/Coolify, the default token path is `./token.json` inside the container's working directory (`/app/token.json`). The Docker image ensures this directory is writable by the runtime user. If you need persistence across restarts, mount a volume to `/app` or set `GOOGLE_OAUTH_TOKEN_FILE` to a mounted writable path.
 
 ---
 
