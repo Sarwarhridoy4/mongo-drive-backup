@@ -387,15 +387,19 @@ func (o *OAuth2Uploader) SaveToken(tok *oauth2.Token) error {
 			return err
 		}
 		o.tokenJSON = string(b)
-		return nil
 	}
-	f, err := os.Create(o.tokenPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 
-	return json.NewEncoder(f).Encode(tok)
+	if o.tokenPath != "" {
+		f, err := os.Create(o.tokenPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		return json.NewEncoder(f).Encode(tok)
+	}
+
+	return nil
 }
 
 func (o *OAuth2Uploader) TokenFromFile() (*oauth2.Token, error) {
