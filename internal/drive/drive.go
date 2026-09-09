@@ -357,10 +357,9 @@ func (o *OAuth2Uploader) tokenFromData() (*oauth2.Token, error) {
 		if err := json.Unmarshal([]byte(o.tokenJSON), &tok); err != nil {
 			return nil, err
 		}
-		if tok.RefreshToken == "" {
-			return nil, fmt.Errorf("inline oauth token missing refresh_token; see setup instructions")
+		if tok.RefreshToken != "" {
+			return &tok, nil
 		}
-		return &tok, nil
 	}
 
 	f, err := os.Open(o.tokenPath)
@@ -383,6 +382,11 @@ func (o *OAuth2Uploader) tokenFromData() (*oauth2.Token, error) {
 
 func (o *OAuth2Uploader) SaveToken(tok *oauth2.Token) error {
 	if o.tokenJSON != "" {
+		b, err := json.Marshal(tok)
+		if err != nil {
+			return err
+		}
+		o.tokenJSON = string(b)
 		return nil
 	}
 	f, err := os.Create(o.tokenPath)
