@@ -96,7 +96,7 @@ func (s *Server) appendLog(entry logger.Entry) {
 		s.logs = s.logs[len(s.logs)-200:]
 	}
 	s.logsMu.Unlock()
-	s.broadcastMonitor(MonitorPayload{Type: "logs", Logs: s.copyLogs()})
+	s.broadcastLogs()
 }
 
 func (s *Server) copyLogs() []logger.Entry {
@@ -111,6 +111,24 @@ func (s *Server) copyStatus() Status {
 	s.statusMu.RLock()
 	defer s.statusMu.RUnlock()
 	return s.status
+}
+
+func (s *Server) broadcastStatus() {
+	status := s.copyStatus()
+	s.broadcastMonitor(MonitorPayload{Type: "status", Status: &status})
+}
+
+func (s *Server) broadcastBackups() {
+	s.broadcastMonitor(MonitorPayload{Type: "backups", Backups: s.snapshotBackups()})
+}
+
+func (s *Server) broadcastLogs() {
+	s.broadcastMonitor(MonitorPayload{Type: "logs", Logs: s.copyLogs()})
+}
+
+func (s *Server) broadcastStatusAndBackups() {
+	s.broadcastStatus()
+	s.broadcastBackups()
 }
 
 func (s *Server) broadcastMonitor(payload MonitorPayload) {
@@ -156,8 +174,9 @@ func (s *Server) snapshotBackups() []BackupItem {
 
 func (s *Server) SetListBackups(fn func() ([]*driveapi.File, error)) {
 	s.logsMu.Lock()
-	defer s.logsMu.Unlock()
 	s.listBackups = fn
+	s.logsMu.Unlock()
+	s.broadcastBackups()
 }
 
 func (s *Server) SetOAuthHandler(handler *drive.OAuth2Uploader) {
@@ -178,8 +197,9 @@ func (s *Server) OAuthAuthURL() string {
 
 func (s *Server) SetConfig(cfgStatus Status) {
 	s.statusMu.Lock()
-	defer s.statusMu.Unlock()
 	s.status = cfgStatus
+	s.statusMu.Unlock()
+	s.broadcastStatus()
 }
 
 func (s *Server) Trigger() <-chan struct{} {
@@ -200,11 +220,10 @@ func (s *Server) RestartCh() <-chan struct{} {
 
 func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	s.lastRunMu.Lock()
-	defer s.lastRunMu.Unlock()
 	s.lastRunTime = time.Now()
+	s.lastRunMu.Unlock()
 
 	s.statusMu.Lock()
-	defer s.statusMu.Unlock()
 	s.status.LastBackup = s.lastRunTime.Format(time.RFC3339)
 	s.status.LastFile = file
 	s.status.LastSize = formatBytes(size)
@@ -217,20 +236,27 @@ func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 		s.status.LastStatus = "success"
 		s.status.LastError = ""
 	}
+	s.statusMu.Unlock()
+
+	s.broadcastStatusAndBackups()
 }
 
 func (s *Server) SetRunning() {
 	s.statusMu.Lock()
-	defer s.statusMu.Unlock()
 	s.status.LastStatus = "running"
 	s.status.LastError = ""
 	s.status.Progress = ""
+	s.statusMu.Unlock()
+
+	s.broadcastStatus()
 }
 
 func (s *Server) SetProgress(progress string) {
 	s.statusMu.Lock()
-	defer s.statusMu.Unlock()
 	s.status.Progress = progress
+	s.statusMu.Unlock()
+
+	s.broadcastStatus()
 }
 
 func (s *Server) handleWebSocket(ws *websocket.Conn) {
