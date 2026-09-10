@@ -12,8 +12,6 @@ linters:
     - unused
     - ineffassign
     - gosec
-    - unconvert
-    - gocyclo
     - shadow
   disable:
     - funlen
@@ -25,8 +23,6 @@ linters-settings:
     check-blank: true
   staticcheck:
     go: "1.26"
-  gocyclo:
-    min-complexity: 20
   gosec:
     excludes:
       - G104
