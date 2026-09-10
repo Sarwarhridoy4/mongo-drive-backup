@@ -115,6 +115,8 @@ Then visit:
 http://localhost:8080
 ```
 
+The dashboard is a live WebSocket page that pushes the current `status`, `logs`, and `backups` snapshots over `/ws`. It receives new events without polling or manual reloads.
+
 The dashboard shows:
 
 - current configuration
@@ -123,6 +125,7 @@ The dashboard shows:
 - recent log history
 - manual backup trigger
 - stop service button
+- OAuth authorize control that becomes disabled automatically when a valid OAuth refresh token already exists
 
 ## 5. Docker build and run
 

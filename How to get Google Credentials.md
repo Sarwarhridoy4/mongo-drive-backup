@@ -65,6 +65,8 @@ This file should look like:
 
 ### 5. Authorize the app and generate a token
 
+The project now ships with a live dashboard WebSocket and a token-aware OAuth button. If a refresh token is already stored in `GOOGLE_OAUTH_TOKEN_FILE` or inline `GOOGLE_OAUTH_TOKEN_JSON`, the authorizer button is disabled in the dashboard instead of asking the user to start a duplicate flow.
+
 Set these environment variables:
 
 ```env

@@ -17,6 +17,12 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
   - Google Cloud service account with Drive API access **and** a Shared Drive, or
   - Personal Gmail account using OAuth 2.0
 
+## Dashboard and realtime features
+
+The built-in web dashboard is served when `WEB_PORT` is configured. It uses a WebSocket (`/ws`) stream for push-driven updates so the page receives `status`, `logs`, and `backups` payloads automatically. This avoids the need for browser fetch polling or manual refresh loops.
+
+The OAuth authorize button is also now wired to the token status endpoint. If a valid refresh token is already available in `GOOGLE_OAUTH_TOKEN_FILE` or `GOOGLE_OAUTH_TOKEN_JSON`, the button is disabled automatically and the page reflects that the token is already authorized.
+
 ## Environment Variables
 
 | Variable                         | Description                          | Default                |

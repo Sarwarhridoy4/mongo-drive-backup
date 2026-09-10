@@ -350,6 +350,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/restart", s.handleRestart)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/backups", s.handleBackups)
+	mux.HandleFunc("/api/oauth/status", s.handleOAuthStatus)
 	mux.HandleFunc("/api/oauth/start", s.handleOAuthStart)
 	mux.HandleFunc("/oauth2callback", s.handleOAuth2Callback)
 	mux.Handle("/ws", websocket.Handler(s.handleWebSocket))
@@ -668,6 +669,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   .action-button:focus-visible {
     outline: 2px solid var(--green-soft);
     outline-offset: 3px;
+  }
+
+  .action-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.78;
+    filter: grayscale(0.4);
   }
 
   .action-button.run {
@@ -1021,6 +1028,28 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       return '<span class="log-line"><span class="log-level">[' + escapeHtml(ts) + '] ' + escapeHtml(level) + '</span> ' + escapeHtml(event) + escapeHtml(fieldText) + '</span>';
     }
 
+    const authorizeButton = document.getElementById('authorizeDrive');
+    async function updateAuthorizeButtonState() {
+      try {
+        const res = await fetch('/api/oauth/status', { method: 'GET' });
+        if (res.status !== 200) {
+          authorizeButton.disabled = true;
+          return;
+        }
+        const data = await res.json();
+        if (!data.configured || data.authorized) {
+          authorizeButton.disabled = true;
+          authorizeButton.textContent = data.authorized ? 'Google Drive Authorized' : 'Authorize Google Drive';
+          return;
+        }
+        authorizeButton.disabled = false;
+        authorizeButton.textContent = 'Authorize Google Drive';
+      } catch (err) {
+        authorizeButton.disabled = true;
+      }
+    }
+    updateAuthorizeButtonState();
+
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(protocol + '://' + location.host + '/ws');
     ws.addEventListener('message', (event) => {
@@ -1133,6 +1162,22 @@ func (s *Server) handleBackupNow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleOAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	configured := s.oauthHandler != nil
+	authorized := configured && s.oauthHandler.HasValidToken()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{
+		"configured": configured,
+		"authorized": authorized,
+	})
+}
+
 func (s *Server) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -1159,6 +1204,10 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 
 	if s.oauthHandler == nil {
 		http.Error(w, "oauth not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if s.oauthHandler.HasValidToken() {
+		http.Error(w, "oauth already authorized", http.StatusConflict)
 		return
 	}
 

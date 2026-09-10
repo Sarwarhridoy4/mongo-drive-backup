@@ -402,6 +402,11 @@ func (o *OAuth2Uploader) SaveToken(tok *oauth2.Token) error {
 	return nil
 }
 
+func (o *OAuth2Uploader) HasValidToken() bool {
+	_, err := o.tokenFromData()
+	return err == nil
+}
+
 func (o *OAuth2Uploader) TokenFromFile() (*oauth2.Token, error) {
 	return o.tokenFromData()
 }
