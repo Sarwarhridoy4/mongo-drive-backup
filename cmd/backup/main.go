@@ -20,9 +20,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server, uploader interface {
-	Upload(ctx context.Context, path, filename string) (string, int64, error)
-}) error {
+func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server, uploader drive.DriveUploader, dumper backup.MongoDumper) error {
 	log.Info("backup_started", map[string]interface{}{
 		"database": cfg.MongoDatabase,
 	})
@@ -39,25 +37,20 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 
-	mongoDumper := backup.NewMongoDumper(cfg.MongoURI, cfg.MongoDatabase, tempDir, log)
-	if err := mongoDumper.Verify(); err != nil {
+	if err := dumper.Verify(); err != nil {
 		return err
 	}
 	archiver := backup.NewArchiver(tempDir, log)
 
 	if webSrv != nil {
-		if u, ok := uploader.(interface {
-			ListFiles(context.Context) ([]*driveapi.File, error)
-		}); ok {
-			webSrv.SetListBackups(func() ([]*driveapi.File, error) {
-				c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				return u.ListFiles(c)
-			})
-		}
+		webSrv.SetListBackups(func() ([]*driveapi.File, error) {
+			c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return uploader.ListFiles(c)
+		})
 	}
 
-	dumpDir, err := mongoDumper.Dump(ctx)
+	dumpDir, err := dumper.Dump(ctx)
 	if err != nil {
 		if webSrv != nil {
 			webSrv.UpdateBackupResult("", 0, err)
@@ -148,9 +141,7 @@ func main() {
 		})
 	}
 
-	var uploader interface {
-		Upload(ctx context.Context, path, filename string) (string, int64, error)
-	}
+	var uploader drive.DriveUploader
 	var oauthHandler *drive.OAuth2Uploader
 
 	if cfg.ServiceAccountJSON != "" {
@@ -190,8 +181,10 @@ func main() {
 		os.Exit(2)
 	}
 
+	tempDir := cfg.TempBackupDir
+
 	backupJob := func(ctx context.Context) error {
-		return runBackup(ctx, cfg, log, webSrv, uploader)
+		return runBackup(ctx, cfg, log, webSrv, uploader, backup.NewMongoDumper(cfg.MongoURI, cfg.MongoDatabase, tempDir, log))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -240,9 +233,7 @@ func main() {
 	<-ctx.Done()
 }
 
-func runService(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server, uploader interface {
-	Upload(ctx context.Context, path, filename string) (string, int64, error)
-}, oauthHandler *drive.OAuth2Uploader, once bool) {
+func runService(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server, uploader drive.DriveUploader, oauthHandler *drive.OAuth2Uploader, once bool) {
 	if err := ensureOAuthIfNeeded(ctx, cfg, log, webSrv, oauthHandler); err != nil {
 		log.Error("oauth_setup_failed", map[string]interface{}{
 			"error": err.Error(),
@@ -253,8 +244,10 @@ func runService(ctx context.Context, cfg *config.Config, log *logger.Logger, web
 		return
 	}
 
+	tempDir := cfg.TempBackupDir
+
 	backupJob := func(ctx context.Context) error {
-		return runBackup(ctx, cfg, log, webSrv, uploader)
+		return runBackup(ctx, cfg, log, webSrv, uploader, backup.NewMongoDumper(cfg.MongoURI, cfg.MongoDatabase, tempDir, log))
 	}
 
 	if once {

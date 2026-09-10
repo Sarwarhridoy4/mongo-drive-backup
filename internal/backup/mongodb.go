@@ -12,7 +12,14 @@ import (
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
 )
 
-type MongoDumper struct {
+type MongoDumper interface {
+	Verify() error
+	Dump(ctx context.Context) (string, error)
+}
+
+var ErrDumpFailed = fmt.Errorf("mongodump failed")
+
+type mongoDumper struct {
 	uri       string
 	database  string
 	outDir    string
@@ -20,12 +27,12 @@ type MongoDumper struct {
 	log       *logger.Logger
 }
 
-func NewMongoDumper(uri, database, outDir string, log *logger.Logger) *MongoDumper {
+func NewMongoDumper(uri, database, outDir string, log *logger.Logger) MongoDumper {
 	mongodump := os.Getenv("MONGODUMP_PATH")
 	if mongodump == "" {
 		mongodump = "mongodump"
 	}
-	return &MongoDumper{
+	return &mongoDumper{
 		uri:       uri,
 		database:  database,
 		outDir:    outDir,
@@ -34,7 +41,7 @@ func NewMongoDumper(uri, database, outDir string, log *logger.Logger) *MongoDump
 	}
 }
 
-func (m *MongoDumper) Verify() error {
+func (m *mongoDumper) Verify() error {
 	path, err := exec.LookPath(m.mongodump)
 	if err != nil {
 		return fmt.Errorf("mongodump not found at %q: %w", m.mongodump, err)
@@ -45,7 +52,7 @@ func (m *MongoDumper) Verify() error {
 	return nil
 }
 
-func (m *MongoDumper) Dump(ctx context.Context) (string, error) {
+func (m *mongoDumper) Dump(ctx context.Context) (string, error) {
 	ts := time.Now().UTC().Format("2006-01-02-150405")
 	dumpDir := filepath.Join(m.outDir, fmt.Sprintf("mongodb-%s-%s", m.database, ts))
 

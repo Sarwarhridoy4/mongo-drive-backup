@@ -16,6 +16,12 @@ import (
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
 )
 
+type DriveUploader interface {
+	Upload(ctx context.Context, path, filename string) (string, int64, error)
+	ListFiles(ctx context.Context) ([]*drive.File, error)
+	DeleteFile(ctx context.Context, fileID string) error
+}
+
 type Uploader struct {
 	folderID      string
 	sharedDriveID string

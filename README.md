@@ -111,6 +111,19 @@ go mod download
 go run ./cmd/backup --once
 ```
 
+## Testing
+
+```bash
+go test ./...
+```
+
+With coverage:
+
+```bash
+go test ./... -race -coverprofile=coverage.out
+go tool cover -func=coverage.out
+```
+
 > Local `go run` requires `mongodump` to be installed on your machine. If you don't have it, use Docker instead:
 >
 > ```bash

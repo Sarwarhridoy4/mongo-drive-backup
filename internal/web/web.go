@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,41 +10,11 @@ import (
 	"time"
 
 	"golang.org/x/net/websocket"
-	"golang.org/x/oauth2"
 	driveapi "google.golang.org/api/drive/v3"
 
 	"github.com/sarwar/mongo-drive-backup/internal/drive"
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
 )
-
-type Status struct {
-	Environment string `json:"environment"`
-	MongoURI    string `json:"mongo_uri,omitempty"`
-	Database    string `json:"database"`
-	Schedule    string `json:"schedule"`
-	Timezone    string `json:"timezone"`
-	NextRun     string `json:"next_run,omitempty"`
-	LastBackup  string `json:"last_backup"`
-	LastStatus  string `json:"last_status"`
-	LastError   string `json:"last_error,omitempty"`
-	LastFile    string `json:"last_file,omitempty"`
-	LastSize    string `json:"last_size,omitempty"`
-	Progress    string `json:"progress,omitempty"`
-}
-
-type BackupItem struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Size  string `json:"size"`
-	MTime string `json:"mtime"`
-}
-
-type MonitorPayload struct {
-	Type    string         `json:"type"`
-	Status  *Status        `json:"status,omitempty"`
-	Logs    []logger.Entry `json:"logs,omitempty"`
-	Backups []BackupItem   `json:"backups,omitempty"`
-}
 
 type Server struct {
 	port         string
@@ -89,96 +58,6 @@ func NewServer(port string, log *logger.Logger) *Server {
 	return s
 }
 
-func (s *Server) appendLog(entry logger.Entry) {
-	s.logsMu.Lock()
-	s.logs = append(s.logs, entry)
-	if len(s.logs) > 200 {
-		s.logs = s.logs[len(s.logs)-200:]
-	}
-	s.logsMu.Unlock()
-	s.broadcastLogs()
-}
-
-func (s *Server) copyLogs() []logger.Entry {
-	s.logsMu.RLock()
-	defer s.logsMu.RUnlock()
-	out := make([]logger.Entry, len(s.logs))
-	copy(out, s.logs)
-	return out
-}
-
-func (s *Server) copyStatus() Status {
-	s.statusMu.RLock()
-	defer s.statusMu.RUnlock()
-	return s.status
-}
-
-func (s *Server) broadcastStatus() {
-	status := s.copyStatus()
-	s.broadcastMonitor(MonitorPayload{Type: "status", Status: &status})
-}
-
-func (s *Server) broadcastBackups() {
-	s.broadcastMonitor(MonitorPayload{Type: "backups", Backups: s.snapshotBackups()})
-}
-
-func (s *Server) broadcastLogs() {
-	s.broadcastMonitor(MonitorPayload{Type: "logs", Logs: s.copyLogs()})
-}
-
-func (s *Server) broadcastStatusAndBackups() {
-	s.broadcastStatus()
-	s.broadcastBackups()
-}
-
-func (s *Server) broadcastMonitor(payload MonitorPayload) {
-	s.wsMu.RLock()
-	conns := make([]*websocket.Conn, 0, len(s.wsConns))
-	for conn := range s.wsConns {
-		conns = append(conns, conn)
-	}
-	s.wsMu.RUnlock()
-
-	for _, conn := range conns {
-		if err := websocket.JSON.Send(conn, payload); err != nil {
-			s.wsMu.Lock()
-			delete(s.wsConns, conn)
-			s.wsMu.Unlock()
-			_ = conn.Close()
-		}
-	}
-}
-
-func (s *Server) snapshotBackups() []BackupItem {
-	s.logsMu.RLock()
-	fn := s.listBackups
-	s.logsMu.RUnlock()
-	if fn == nil {
-		return nil
-	}
-	files, err := fn()
-	if err != nil {
-		return nil
-	}
-	items := make([]BackupItem, 0, len(files))
-	for _, f := range files {
-		items = append(items, BackupItem{
-			ID:    f.Id,
-			Name:  f.Name,
-			Size:  fmt.Sprintf("%d", f.Size),
-			MTime: f.ModifiedTime,
-		})
-	}
-	return items
-}
-
-func (s *Server) SetListBackups(fn func() ([]*driveapi.File, error)) {
-	s.logsMu.Lock()
-	s.listBackups = fn
-	s.logsMu.Unlock()
-	s.broadcastBackups()
-}
-
 func (s *Server) SetOAuthHandler(handler *drive.OAuth2Uploader) {
 	s.oauthHandler = handler
 }
@@ -195,13 +74,6 @@ func (s *Server) OAuthAuthURL() string {
 	return s.oauthAuthURL
 }
 
-func (s *Server) SetConfig(cfgStatus Status) {
-	s.statusMu.Lock()
-	s.status = cfgStatus
-	s.statusMu.Unlock()
-	s.broadcastStatus()
-}
-
 func (s *Server) Trigger() <-chan struct{} {
 	return s.triggerCh
 }
@@ -216,70 +88,6 @@ func (s *Server) StopCh() <-chan struct{} {
 
 func (s *Server) RestartCh() <-chan struct{} {
 	return s.restartCh
-}
-
-func (s *Server) UpdateBackupResult(file string, size int64, err error) {
-	s.lastRunMu.Lock()
-	s.lastRunTime = time.Now()
-	s.lastRunMu.Unlock()
-
-	s.statusMu.Lock()
-	s.status.LastBackup = s.lastRunTime.Format(time.RFC3339)
-	s.status.LastFile = file
-	s.status.LastSize = formatBytes(size)
-	s.status.Progress = ""
-
-	if err != nil {
-		s.status.LastStatus = "failed"
-		s.status.LastError = err.Error()
-	} else {
-		s.status.LastStatus = "success"
-		s.status.LastError = ""
-	}
-	s.statusMu.Unlock()
-
-	s.broadcastStatusAndBackups()
-}
-
-func (s *Server) SetRunning() {
-	s.statusMu.Lock()
-	s.status.LastStatus = "running"
-	s.status.LastError = ""
-	s.status.Progress = ""
-	s.statusMu.Unlock()
-
-	s.broadcastStatus()
-}
-
-func (s *Server) SetProgress(progress string) {
-	s.statusMu.Lock()
-	s.status.Progress = progress
-	s.statusMu.Unlock()
-
-	s.broadcastStatus()
-}
-
-func (s *Server) handleWebSocket(ws *websocket.Conn) {
-	s.wsMu.Lock()
-	s.wsConns[ws] = struct{}{}
-	s.wsMu.Unlock()
-	defer func() {
-		s.wsMu.Lock()
-		delete(s.wsConns, ws)
-		s.wsMu.Unlock()
-		_ = ws.Close()
-	}()
-
-	status := s.copyStatus()
-	_ = websocket.JSON.Send(ws, MonitorPayload{Type: "status", Status: &status})
-	_ = websocket.JSON.Send(ws, MonitorPayload{Type: "logs", Logs: s.copyLogs()})
-	_ = websocket.JSON.Send(ws, MonitorPayload{Type: "backups", Backups: s.snapshotBackups()})
-
-	for {
-		if _, err := ws.Read(make([]byte, 1)); err != nil {
-			return
-		}
-	}
 }
 
 func findAssetPath(name string) string {
@@ -355,8 +163,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/oauth2callback", s.handleOAuth2Callback)
 	mux.Handle("/ws", websocket.Handler(s.handleWebSocket))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	s.log.Info("web_server_started", map[string]interface{}{
 		"port": s.port,
@@ -806,6 +616,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
   .log-line:last-child {
     border-bottom: 0;
+    padding-bottom: 0;
   }
 
   .log-line::before {
@@ -1162,87 +973,6 @@ func (s *Server) handleBackupNow(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleOAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	configured := s.oauthHandler != nil
-	authorized := configured && s.oauthHandler.HasValidToken()
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{
-		"configured": configured,
-		"authorized": authorized,
-	})
-}
-
-func (s *Server) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("missing code"))
-		return
-	}
-
-	select {
-	case s.oauthCodeCh <- code:
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OAuth authorization successful. You can close this tab."))
-	default:
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte("oauth callback not ready"))
-	}
-}
-
-func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if s.oauthHandler == nil {
-		http.Error(w, "oauth not configured", http.StatusServiceUnavailable)
-		return
-	}
-	if s.oauthHandler.HasValidToken() {
-		http.Error(w, "oauth already authorized", http.StatusConflict)
-		return
-	}
-
-	url, config, err := s.oauthHandler.GetAuthURL(r.Context())
-	if err != nil {
-		s.log.Error("oauth_auth_url_failed", map[string]interface{}{
-			"error": err.Error(),
-		})
-		http.Error(w, "failed to generate auth url", http.StatusInternalServerError)
-		return
-	}
-
-	s.SetOAuthAuthURL(url)
-
-	go func(ctx context.Context, cfg *oauth2.Config) {
-		tok, err := s.oauthHandler.WaitForToken(ctx, cfg)
-		if err != nil {
-			s.log.Error("oauth_token_exchange_failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return
-		}
-		if err := s.oauthHandler.SaveToken(tok); err != nil {
-			s.log.Error("oauth_token_save_failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-			return
-		}
-		s.log.Info("oauth_token_saved_via_ui", nil)
-	}(context.Background(), config)
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
-}
-
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1305,13 +1035,6 @@ func (s *Server) handleBackups(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	type BackupItem struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Size  string `json:"size"`
-		MTime string `json:"mtime"`
 	}
 
 	items := make([]BackupItem, 0, len(files))
