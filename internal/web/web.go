@@ -31,22 +31,22 @@ type Status struct {
 }
 
 type Server struct {
-	port        string
-	status      Status
-	statusMu    sync.RWMutex
-	triggerCh   chan struct{}
-	log         *logger.Logger
-	lastRunMu   sync.RWMutex
-	lastRunTime time.Time
-	oauthCodeCh chan string
-	stopCh      chan struct{}
-	restartCh   chan struct{}
-	logs        []logger.Entry
-	logsMu      sync.RWMutex
-	listBackups func() ([]*driveapi.File, error)
+	port         string
+	status       Status
+	statusMu     sync.RWMutex
+	triggerCh    chan struct{}
+	log          *logger.Logger
+	lastRunMu    sync.RWMutex
+	lastRunTime  time.Time
+	oauthCodeCh  chan string
+	stopCh       chan struct{}
+	restartCh    chan struct{}
+	logs         []logger.Entry
+	logsMu       sync.RWMutex
+	listBackups  func() ([]*driveapi.File, error)
 	oauthHandler *drive.OAuth2Uploader
 	oauthAuthURL string
-	oauthMu     sync.RWMutex
+	oauthMu      sync.RWMutex
 }
 
 func NewServer(port string, log *logger.Logger) *Server {
@@ -177,10 +177,28 @@ func (s *Server) Start() error {
 		"port": s.port,
 	})
 
-	return http.ListenAndServe(":"+s.port, mux)
+	return http.ListenAndServe(":"+s.port, secureHeaders(mux))
+}
+
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' https://drive.google.com data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	html := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -188,80 +206,636 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>MongoDB Backup Service</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --deep: #01140d;
+    --green: #78ff9a;
+    --green-soft: #baffcc;
+    --green-muted: #2b8f56;
+    --green-deep: #073b21;
+    --line: #69d793;
+    --line-soft: #9affba;
+    --panel: #021f15;
+    --panel-soft: #032917;
+    --text: var(--green-soft);
+    --muted: var(--green);
+    --subtle: var(--green-muted);
+    --primary: var(--green);
+    --primary-2: var(--green-soft);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--deep);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .dashboard-wrap {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 24px 16px 40px;
+  }
+
+  .dashboard-shell {
+    display: flex;
+    gap: 16px;
+    min-height: calc(100vh - 80px);
+  }
+
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.95fr) minmax(420px, 1.45fr);
+    gap: 16px;
+  }
+
+  .sidebar {
+    width: 250px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 14px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+    flex-shrink: 0;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0 20px;
+  }
+
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--green);
+    color: var(--deep);
+    font-weight: 900;
+    font-size: 1.1rem;
+    box-shadow: 0 0 22px rgba(120, 255, 154, 0.45);
+  }
+
+  .brand-name {
+    font-size: 1.04rem;
+    font-weight: 800;
+    color: var(--text);
+  }
+
+  .brand-sub {
+    color: var(--muted);
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .nav-list {
+    margin: 30px 0 20px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .nav-list li {
+    margin-bottom: 8px;
+  }
+
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 0.86rem;
+    padding: 11px 12px;
+    border-radius: 10px;
+    text-decoration: none;
+    border: 1px solid transparent;
+  }
+
+  .nav-link.active,
+  .nav-link:hover {
+    color: var(--text);
+    border-color: var(--line-soft);
+    background: var(--panel-soft);
+  }
+
+  .nav-link .nav-icon {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+
+  .sidebar-card {
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    padding: 12px;
+    background: var(--panel-soft);
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 14px;
+  }
+
+  .sidebar-card strong {
+    color: var(--text);
+  }
+
+  .main-panel {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  }
+
+  .dashboard-title {
+    margin: 0 0 4px;
+    font-size: clamp(1.7rem, 2.5vw, 2.4rem);
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .dashboard-subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .service-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel-soft);
+    font-size: 0.86rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .service-chip::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 4px rgba(120, 255, 154, 0.16);
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.24);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 14px;
+  }
+
+  .stat-card {
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px;
+    min-height: 88px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .stat-label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .stat-value {
+    margin-top: 8px;
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text);
+    word-break: break-word;
+  }
+
+  .stat-value.error {
+    color: var(--green-soft);
+  }
+
+  .stat-value.success {
+    color: var(--green-soft);
+  }
+
+  .stat-value.running {
+    color: var(--green);
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 0 0 16px;
+  }
+
+  .action-button {
+    appearance: none;
+    border: 0;
+    color: var(--deep);
+    padding: 11px 16px;
+    border-radius: 12px;
+    font-weight: 800;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: transform 180ms ease, filter 180ms ease, opacity 180ms ease;
+    background: var(--green);
+  }
+
+  .action-button:hover {
+    filter: brightness(1.08);
+  }
+
+  .action-button:focus-visible {
+    outline: 2px solid var(--green-soft);
+    outline-offset: 3px;
+  }
+
+  .action-button.run {
+    background: var(--green);
+  }
+
+  .action-button.restart {
+    background: var(--green-muted);
+    color: var(--green-soft);
+  }
+
+  .action-button.authorize {
+    background: var(--green-soft);
+  }
+
+  .message {
+    color: var(--muted);
+    font-size: 0.86rem;
+  }
+
+  .panel-title {
+    margin: 0 0 14px;
+    font-size: clamp(1.2rem, 3vw, 1.4rem);
+    font-weight: 700;
+  }
+
+  .backup-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .backup-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--text);
+    font-size: 0.86rem;
+    word-break: break-all;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+  }
+
+  .backup-item:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .backup-item a {
+    color: var(--green-soft);
+    text-decoration: none;
+  }
+
+  .backup-item a:hover {
+    text-decoration: underline;
+  }
+
+  .backup-meta {
+    color: var(--muted);
+  }
+
+  .terminal-panel {
+    background: var(--deep);
+    border-color: var(--line-soft);
+  }
+
+  .terminal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 0 12px;
+    border-bottom: 1px solid rgba(129, 140, 248, 0.34);
+  }
+
+  .terminal-title {
+    font-size: 0.84rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: var(--green-soft);
+    text-transform: uppercase;
+  }
+
+  .terminal-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .terminal-button {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--green-muted);
+  }
+
+  .terminal-button.red {
+    background: var(--green-soft);
+  }
+
+  .terminal-button.amber {
+    background: var(--green);
+  }
+
+  .terminal-button.green {
+    background: var(--green-soft);
+  }
+
+  .log-list {
+    font-family: "JetBrains Mono", "Roboto Mono", monospace;
+    font-size: 0.82rem;
+    color: var(--text);
+    background: var(--deep);
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    padding: 14px;
+    white-space: pre-wrap;
+    max-height: 270px;
+    overflow: auto;
+    line-height: 1.65;
+    box-shadow: inset 0 0 15px rgba(120, 255, 154, 0.08);
+    background-image: repeating-linear-gradient(180deg, transparent, transparent 4px, rgba(120, 255, 154, 0.03) 4px);
+  }
+
+  .log-line {
+    display: block;
+    border-bottom: 1px dotted var(--line);
+    padding: 2px 0;
+  }
+
+  .log-line:last-child {
+    border-bottom: 0;
+  }
+
+  .log-line::before {
+    content: "$ ";
+    color: var(--green);
+    font-weight: 800;
+  }
+
+  .log-level {
+    color: var(--green-soft);
+    font-weight: 700;
+  }
+
+  @media (max-width: 1100px) {
+    .dashboard-shell {
+      flex-direction: column;
+    }
+
+    .sidebar {
+      width: 100%;
+    }
+
+    .nav-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .nav-list li {
+      margin: 0;
+    }
+
+    .dashboard-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .dashboard-wrap {
+      padding: 12px 10px 24px;
+    }
+
+    .dashboard-shell {
+      min-height: auto;
+    }
+
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .actions {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .action-button {
+      width: 100%;
+      flex: 1 1 100%;
+    }
+
+    .panel {
+      padding: 16px;
+    }
+
+    .topbar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .dashboard-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .dashboard-wrap {
+      padding: 8px 8px 20px;
+    }
+
+    .panel {
+      padding: 14px;
+    }
+
+    .action-button {
+      flex-basis: 100%;
+    }
+
+    .log-list {
+      max-height: 240px;
+    }
+  }
+</style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-  <div class="max-w-3xl mx-auto px-4 py-10">
-    <h1 class="text-2xl font-semibold mb-6">MongoDB Google Drive Backup</h1>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<body>
+  <div class="dashboard-wrap">
+  <div class="dashboard-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">DB</div>
         <div>
-          <div class="text-xs text-slate-400">Environment</div>
-          <div id="env" class="mt-1 font-medium">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Database</div>
-          <div id="database" class="mt-1 font-medium">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Schedule</div>
-          <div id="schedule" class="mt-1 font-medium">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Timezone</div>
-          <div id="timezone" class="mt-1 font-medium">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Last Backup</div>
-          <div id="last_backup" class="mt-1 font-medium">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Status</div>
-          <div id="last_status" class="mt-1 font-medium">-</div>
-        </div>
-        <div class="sm:col-span-2">
-          <div class="text-xs text-slate-400">Last File</div>
-          <div id="last_file" class="mt-1 font-medium break-all">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Last Size</div>
-          <div id="last_size" class="mt-1 font-medium">-</div>
-        </div>
-        <div>
-          <div class="text-xs text-slate-400">Last Error</div>
-          <div id="last_error" class="mt-1 font-medium text-red-400 break-all">-</div>
-        </div>
-        <div class="sm:col-span-2">
-          <div class="text-xs text-slate-400">Progress</div>
-          <div id="progress" class="mt-1 font-medium text-slate-300">-</div>
+          <div class="brand-name">MongoDrive</div>
+          <div class="brand-sub">Backup</div>
         </div>
       </div>
-    </div>
 
-    <div class="flex items-center gap-3">
-      <button id="runNow" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium">
-        Run Backup Now
-      </button>
-      <button id="restartNow" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg font-medium">
-        Restart Service
-      </button>
-      <button id="authorizeDrive" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium">
-        Authorize Google Drive
-      </button>
-      <span id="message" class="text-sm text-slate-400"></span>
-    </div>
+      <ul class="nav-list">
+        <li><a class="nav-link active" href="#"><span class="nav-icon"></span>Overview</a></li>
+        <li><a class="nav-link" href="#"><span class="nav-icon"></span>Backups</a></li>
+        <li><a class="nav-link" href="#"><span class="nav-icon"></span>Log Stream</a></li>
+        <li><a class="nav-link" href="#"><span class="nav-icon"></span>Drive Auth</a></li>
+      </ul>
 
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
-      <h2 class="text-lg font-semibold mb-4">Backups in Google Drive</h2>
-      <div id="backups" class="text-sm text-slate-300">Loading...</div>
-    </div>
+      <div class="sidebar-card">
+        <div><strong>Service:</strong> MongoDB</div>
+        <div><strong>Target:</strong> Google Drive</div>
+      </div>
+    </aside>
 
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
-      <h2 class="text-lg font-semibold mb-4">Log History</h2>
-      <div id="logs" class="text-sm text-slate-300 font-mono whitespace-pre-wrap max-h-96 overflow-auto">Loading...</div>
-    </div>
+    <main class="main-panel">
+      <section class="topbar">
+        <div>
+          <h1 class="dashboard-title">MongoDB Google Drive Backup</h1>
+          <p class="dashboard-subtitle">Service dashboard</p>
+        </div>
+        <div class="service-chip">online</div>
+      </section>
+
+      <section class="panel">
+        <div class="stats-grid">
+          <article class="stat-card">
+            <div class="stat-label">Environment</div>
+            <div id="env" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Database</div>
+            <div id="database" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Schedule</div>
+            <div id="schedule" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Timezone</div>
+            <div id="timezone" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Last Backup</div>
+            <div id="last_backup" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Status</div>
+            <div id="last_status" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Last File</div>
+            <div id="last_file" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Last Size</div>
+            <div id="last_size" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Last Error</div>
+            <div id="last_error" class="stat-value error">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Progress</div>
+            <div id="progress" class="stat-value">-</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="runNow" class="action-button run">Run Backup Now</button>
+        <button id="restartNow" class="action-button restart">Restart Service</button>
+        <button id="authorizeDrive" class="action-button authorize">Authorize Google Drive</button>
+        <span id="message" class="message"></span>
+      </section>
+
+      <section class="dashboard-grid">
+        <section class="panel">
+          <h2 class="panel-title">Backups in Google Drive</h2>
+          <div id="backups" class="backup-list">Loading...</div>
+        </section>
+
+        <section class="panel terminal-panel">
+          <div class="terminal-head">
+            <div class="terminal-title">Log History</div>
+            <div class="terminal-buttons">
+              <span class="terminal-button red"></span>
+              <span class="terminal-button amber"></span>
+              <span class="terminal-button green"></span>
+            </div>
+          </div>
+          <div id="logs" class="log-list">Loading...</div>
+        </section>
+      </section>
+    </main>
   </div>
 
   <script>
+    function statusClass(status) {
+      if (status === 'success') return 'stat-value success';
+      if (status === 'failed') return 'stat-value error';
+      if (status === 'running') return 'stat-value running';
+      return 'stat-value';
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function readLogLine(line) {
+      const ts = line.time || new Date().toISOString();
+      const level = String(line.level || 'info').toUpperCase();
+      const event = line.event || 'log';
+      const fields = line.fields || {};
+      const fieldText = Object.keys(fields).length ? ' ' + JSON.stringify(fields) : '';
+      return '<span class="log-line"><span class="log-level">[' + escapeHtml(ts) + '] ' + escapeHtml(level) + '</span> ' + escapeHtml(event) + fieldText + '</span>';
+    }
+
     async function loadStatus() {
       const res = await fetch('/api/status');
       const data = await res.json();
@@ -275,8 +849,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       document.getElementById('last_error').textContent = data.last_error || '-';
       document.getElementById('progress').textContent = data.progress || '-';
       const statusEl = document.getElementById('last_status');
-      statusEl.textContent = data.last_status;
-      statusEl.className = 'mt-1 font-medium ' + (data.last_status === 'success' ? 'text-emerald-400' : data.last_status === 'failed' ? 'text-red-400' : data.last_status === 'running' ? 'text-amber-400' : 'text-slate-300');
+      statusEl.textContent = data.last_status || '-';
+      statusEl.className = statusClass(data.last_status);
     }
 
     async function loadLogs() {
@@ -284,10 +858,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       const logs = await res.json();
       const el = document.getElementById('logs');
       if (!logs.length) {
-        el.textContent = 'No logs yet';
+        el.innerHTML = '<span class="log-line">No logs yet</span>';
         return;
       }
-      el.textContent = logs.slice(-100).map(l => '[' + l.time + '] ' + l.level.toUpperCase() + ' ' + l.event + ' ' + JSON.stringify(l.fields || {})).join('\n');
+      el.innerHTML = logs.slice(-100).map(readLogLine).join('');
     }
 
     async function loadBackups() {
@@ -302,7 +876,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         el.textContent = 'No backups found';
         return;
       }
-      el.innerHTML = items.map(item => '<div class="mb-2 break-all"><a href="https://drive.google.com/open?id=' + item.id + '" target="_blank" class="text-indigo-400 hover:underline">' + item.name + '</a> <span class="text-slate-400">(' + item.size + ')</span> <span class="text-slate-500">' + item.mtime + '</span></div>').join('');
+      el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(item.mtime) + '</span></div>').join('');
     }
 
     document.getElementById('runNow').addEventListener('click', async () => {
@@ -335,7 +909,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         if (res.status === 200) {
           const data = await res.json();
           msg.textContent = 'Opening authorization page...';
-          window.open(data.url, '_blank');
+          window.open(data.url, '_blank', 'noopener,noreferrer');
         } else {
           msg.textContent = 'Failed: ' + (await res.text());
         }
