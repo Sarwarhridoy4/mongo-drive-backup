@@ -46,3 +46,21 @@ func TestHandleIndexShouldExposeWebSocketMonitor(t *testing.T) {
 		t.Fatal("index page should point the WebSocket client at the monitoring endpoint")
 	}
 }
+
+func TestHandleFaviconShouldServeSVGIcon(t *testing.T) {
+	server := NewServer("8080", logger.New("production", io.Discard))
+	req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleFavicon(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "image/svg+xml") {
+		t.Fatalf("expected SVG favicon content type, got %q", got)
+	}
+	if body := resp.Body.String(); !strings.Contains(body, "<svg") {
+		t.Fatal("expected favicon SVG payload")
+	}
+}

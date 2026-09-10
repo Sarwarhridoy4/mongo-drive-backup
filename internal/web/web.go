@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -254,10 +256,68 @@ func (s *Server) handleWebSocket(ws *websocket.Conn) {
 	}
 }
 
+func findAssetPath(name string) string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return name
+	}
+
+	for {
+		candidate := filepath.Join(wd, name)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate
+		}
+		parent := filepath.Dir(wd)
+		if parent == wd {
+			break
+		}
+		wd = parent
+	}
+	return name
+}
+
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	iconPath := findAssetPath("favicon.svg")
+	data, err := os.ReadFile(iconPath)
+	if err != nil {
+		http.Error(w, "favicon not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	iconPath := findAssetPath("logo.svg")
+	data, err := os.ReadFile(iconPath)
+	if err != nil {
+		http.Error(w, "logo not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(data)
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/favicon.svg", s.handleFavicon)
+	mux.HandleFunc("/logo.svg", s.handleLogo)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/backup/now", s.handleBackupNow)
 	mux.HandleFunc("/api/stop", s.handleStop)
@@ -303,6 +363,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>MongoDB Backup Service</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   :root {
@@ -811,7 +872,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   <div class="dashboard-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">DB</div>
+        <img class="brand-mark" src="/logo.svg" alt="MongoDrive Backup" width="44" height="44" />
         <div>
           <div class="brand-name">MongoDrive</div>
           <div class="brand-sub">Backup</div>
