@@ -921,11 +921,6 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     loadStatus();
     loadLogs();
     loadBackups();
-    setInterval(() => {
-      loadStatus();
-      loadLogs();
-      loadBackups();
-    }, 3000);
   </script>
 </body>
 </html>`
