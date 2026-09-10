@@ -1,6 +1,6 @@
 # How to Run
 
-This repository is a Go service that periodically creates a MongoDB dump, compresses it, verifies the archive, uploads the archive to a Google Drive folder, and optionally serves a small web dashboard when `WEB_PORT` is set.
+This repository is a Go service that periodically creates a MongoDB dump, compresses it, verifies the archive, uploads the archive to a Google Drive folder, and optionally serves a small web dashboard when `WEB_PORT` is set. The built-in dashboard uses a WebSocket (`/ws`) stream for live status, logs, and backup metadata instead of repeatedly calling the REST endpoints with a timer.
 
 ## 1. Prerequisites
 
@@ -116,6 +116,7 @@ http://localhost:8080
 ```
 
 The dashboard shows:
+
 - current configuration
 - last backup status and progress
 - backups currently in Google Drive

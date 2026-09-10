@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/websocket"
 	"golang.org/x/oauth2"
 	driveapi "google.golang.org/api/drive/v3"
 
@@ -30,6 +31,20 @@ type Status struct {
 	Progress    string `json:"progress,omitempty"`
 }
 
+type BackupItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Size  string `json:"size"`
+	MTime string `json:"mtime"`
+}
+
+type MonitorPayload struct {
+	Type    string         `json:"type"`
+	Status  *Status        `json:"status,omitempty"`
+	Logs    []logger.Entry `json:"logs,omitempty"`
+	Backups []BackupItem   `json:"backups,omitempty"`
+}
+
 type Server struct {
 	port         string
 	status       Status
@@ -47,6 +62,8 @@ type Server struct {
 	oauthHandler *drive.OAuth2Uploader
 	oauthAuthURL string
 	oauthMu      sync.RWMutex
+	wsMu         sync.RWMutex
+	wsConns      map[*websocket.Conn]struct{}
 }
 
 func NewServer(port string, log *logger.Logger) *Server {
@@ -64,6 +81,7 @@ func NewServer(port string, log *logger.Logger) *Server {
 			Timezone:    "UTC",
 			LastStatus:  "idle",
 		},
+		wsConns: make(map[*websocket.Conn]struct{}),
 	}
 	log.AddHook(s.appendLog)
 	return s
@@ -71,11 +89,67 @@ func NewServer(port string, log *logger.Logger) *Server {
 
 func (s *Server) appendLog(entry logger.Entry) {
 	s.logsMu.Lock()
-	defer s.logsMu.Unlock()
 	s.logs = append(s.logs, entry)
 	if len(s.logs) > 200 {
 		s.logs = s.logs[len(s.logs)-200:]
 	}
+	s.logsMu.Unlock()
+	s.broadcastMonitor(MonitorPayload{Type: "logs", Logs: s.copyLogs()})
+}
+
+func (s *Server) copyLogs() []logger.Entry {
+	s.logsMu.RLock()
+	defer s.logsMu.RUnlock()
+	out := make([]logger.Entry, len(s.logs))
+	copy(out, s.logs)
+	return out
+}
+
+func (s *Server) copyStatus() Status {
+	s.statusMu.RLock()
+	defer s.statusMu.RUnlock()
+	return s.status
+}
+
+func (s *Server) broadcastMonitor(payload MonitorPayload) {
+	s.wsMu.RLock()
+	conns := make([]*websocket.Conn, 0, len(s.wsConns))
+	for conn := range s.wsConns {
+		conns = append(conns, conn)
+	}
+	s.wsMu.RUnlock()
+
+	for _, conn := range conns {
+		if err := websocket.JSON.Send(conn, payload); err != nil {
+			s.wsMu.Lock()
+			delete(s.wsConns, conn)
+			s.wsMu.Unlock()
+			_ = conn.Close()
+		}
+	}
+}
+
+func (s *Server) snapshotBackups() []BackupItem {
+	s.logsMu.RLock()
+	fn := s.listBackups
+	s.logsMu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	files, err := fn()
+	if err != nil {
+		return nil
+	}
+	items := make([]BackupItem, 0, len(files))
+	for _, f := range files {
+		items = append(items, BackupItem{
+			ID:    f.Id,
+			Name:  f.Name,
+			Size:  fmt.Sprintf("%d", f.Size),
+			MTime: f.ModifiedTime,
+		})
+	}
+	return items
 }
 
 func (s *Server) SetListBackups(fn func() ([]*driveapi.File, error)) {
@@ -157,6 +231,29 @@ func (s *Server) SetProgress(progress string) {
 	s.status.Progress = progress
 }
 
+func (s *Server) handleWebSocket(ws *websocket.Conn) {
+	s.wsMu.Lock()
+	s.wsConns[ws] = struct{}{}
+	s.wsMu.Unlock()
+	defer func() {
+		s.wsMu.Lock()
+		delete(s.wsConns, ws)
+		s.wsMu.Unlock()
+		_ = ws.Close()
+	}()
+
+	status := s.copyStatus()
+	_ = websocket.JSON.Send(ws, MonitorPayload{Type: "status", Status: &status})
+	_ = websocket.JSON.Send(ws, MonitorPayload{Type: "logs", Logs: s.copyLogs()})
+	_ = websocket.JSON.Send(ws, MonitorPayload{Type: "backups", Backups: s.snapshotBackups()})
+
+	for {
+		if _, err := ws.Read(make([]byte, 1)); err != nil {
+			return
+		}
+	}
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -169,6 +266,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/backups", s.handleBackups)
 	mux.HandleFunc("/api/oauth/start", s.handleOAuthStart)
 	mux.HandleFunc("/oauth2callback", s.handleOAuth2Callback)
+	mux.Handle("/ws", websocket.Handler(s.handleWebSocket))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -182,7 +280,7 @@ func (s *Server) Start() error {
 
 func secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' https://drive.google.com data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' https://drive.google.com data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -832,52 +930,46 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       const level = String(line.level || 'info').toUpperCase();
       const event = line.event || 'log';
       const fields = line.fields || {};
-      const fieldText = Object.keys(fields).length ? ' ' + JSON.stringify(fields) : '';
-      return '<span class="log-line"><span class="log-level">[' + escapeHtml(ts) + '] ' + escapeHtml(level) + '</span> ' + escapeHtml(event) + fieldText + '</span>';
+      const fieldText = Object.keys(fields).length ? ' ' + JSON.stringify(fields, null, 2) : '';
+      return '<span class="log-line"><span class="log-level">[' + escapeHtml(ts) + '] ' + escapeHtml(level) + '</span> ' + escapeHtml(event) + escapeHtml(fieldText) + '</span>';
     }
 
-    async function loadStatus() {
-      const res = await fetch('/api/status');
-      const data = await res.json();
-      document.getElementById('env').textContent = data.environment;
-      document.getElementById('database').textContent = data.database;
-      document.getElementById('schedule').textContent = data.schedule;
-      document.getElementById('timezone').textContent = data.timezone;
-      document.getElementById('last_backup').textContent = data.last_backup || '-';
-      document.getElementById('last_file').textContent = data.last_file || '-';
-      document.getElementById('last_size').textContent = data.last_size || '-';
-      document.getElementById('last_error').textContent = data.last_error || '-';
-      document.getElementById('progress').textContent = data.progress || '-';
-      const statusEl = document.getElementById('last_status');
-      statusEl.textContent = data.last_status || '-';
-      statusEl.className = statusClass(data.last_status);
-    }
-
-    async function loadLogs() {
-      const res = await fetch('/api/logs');
-      const logs = await res.json();
-      const el = document.getElementById('logs');
-      if (!logs.length) {
-        el.innerHTML = '<span class="log-line">No logs yet</span>';
-        return;
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(protocol + '://' + location.host + '/ws');
+    ws.addEventListener('message', (event) => {
+      const payload = JSON.parse(event.data);
+      if (payload.type === 'status' && payload.status) {
+        const data = payload.status;
+        document.getElementById('env').textContent = data.environment || '-';
+        document.getElementById('database').textContent = data.database || '-';
+        document.getElementById('schedule').textContent = data.schedule || '-';
+        document.getElementById('timezone').textContent = data.timezone || '-';
+        document.getElementById('last_backup').textContent = data.last_backup || '-';
+        document.getElementById('last_file').textContent = data.last_file || '-';
+        document.getElementById('last_size').textContent = data.last_size || '-';
+        document.getElementById('last_error').textContent = data.last_error || '-';
+        document.getElementById('progress').textContent = data.progress || '-';
+        const statusEl = document.getElementById('last_status');
+        statusEl.textContent = data.last_status || '-';
+        statusEl.className = statusClass(data.last_status);
       }
-      el.innerHTML = logs.slice(-100).map(readLogLine).join('');
-    }
-
-    async function loadBackups() {
-      const res = await fetch('/api/backups');
-      if (res.status === 204) {
-        document.getElementById('backups').textContent = 'No backups found';
-        return;
+      if (payload.type === 'logs' && Array.isArray(payload.logs)) {
+        const el = document.getElementById('logs');
+        if (!payload.logs.length) {
+          el.innerHTML = '<span class="log-line">No logs yet</span>';
+          return;
+        }
+        el.innerHTML = payload.logs.slice(-100).map(readLogLine).join('');
       }
-      const items = await res.json();
-      const el = document.getElementById('backups');
-      if (!items.length) {
-        el.textContent = 'No backups found';
-        return;
+      if (payload.type === 'backups' && Array.isArray(payload.backups)) {
+        const el = document.getElementById('backups');
+        if (!payload.backups.length) {
+          el.textContent = 'No backups found';
+          return;
+        }
+        el.innerHTML = payload.backups.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(item.mtime) + '</span></div>').join('');
       }
-      el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(item.mtime) + '</span></div>').join('');
-    }
+    });
 
     document.getElementById('runNow').addEventListener('click', async () => {
       const msg = document.getElementById('message');
@@ -917,10 +1009,6 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         msg.textContent = 'Error: ' + err.message;
       }
     });
-
-    loadStatus();
-    loadLogs();
-    loadBackups();
   </script>
 </body>
 </html>`

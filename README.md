@@ -19,27 +19,27 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 
 ## Environment Variables
 
-| Variable                      | Description                              | Default                |
-| ----------------------------- | ---------------------------------------- | ---------------------- |
-| `APP_ENV`                     | Environment                              | `production`           |
-| `MONGODB_URI`                 | MongoDB connection string                | Required               |
-| `MONGODB_DATABASE`            | Database name to backup                  | Required               |
-| `BACKUP_SCHEDULE`             | Cron schedule                            | `0 2 * * *`            |
-| `BACKUP_TIMEZONE`             | Schedule timezone                        | `UTC`                  |
-| `GOOGLE_DRIVE_FOLDER_ID`      | Target Drive folder ID                   | Required               |
-| `GOOGLE_SHARED_DRIVE_ID`      | Shared Drive ID                          | Optional               |
-| `GOOGLE_OAUTH_CREDENTIALS_FILE` | OAuth client credentials JSON path      | Optional               |
-| `GOOGLE_OAUTH_CREDENTIALS_JSON` | OAuth client credentials JSON inline    | Optional               |
-| `GOOGLE_OAUTH_TOKEN_FILE`     | OAuth token file path                    | `./token.json`         |
-| `GOOGLE_OAUTH_TOKEN_JSON`     | OAuth token JSON inline                  | Optional               |
-| `GOOGLE_OAUTH_CALLBACK_URL`   | Public OAuth callback URL                | Optional               |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path        | Optional               |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Service account JSON inline              | Optional               |
-| `BACKUP_RETENTION_DAYS`       | Retention in days                        | `30`                   |
-| `TEMP_BACKUP_DIR`             | Temp directory                           | `/tmp/mongodb-backups` |
-| `RUN_BACKUP_ON_START`         | Run backup on startup                    | `false`                |
-| `WEB_PORT`                    | Web UI port, e.g. `8080`                 | Optional               |
-| `MONGODUMP_PATH`              | Full path to `mongodump`                 | Optional               |
+| Variable                         | Description                          | Default                |
+| -------------------------------- | ------------------------------------ | ---------------------- |
+| `APP_ENV`                        | Environment                          | `production`           |
+| `MONGODB_URI`                    | MongoDB connection string            | Required               |
+| `MONGODB_DATABASE`               | Database name to backup              | Required               |
+| `BACKUP_SCHEDULE`                | Cron schedule                        | `0 2 * * *`            |
+| `BACKUP_TIMEZONE`                | Schedule timezone                    | `UTC`                  |
+| `GOOGLE_DRIVE_FOLDER_ID`         | Target Drive folder ID               | Required               |
+| `GOOGLE_SHARED_DRIVE_ID`         | Shared Drive ID                      | Optional               |
+| `GOOGLE_OAUTH_CREDENTIALS_FILE`  | OAuth client credentials JSON path   | Optional               |
+| `GOOGLE_OAUTH_CREDENTIALS_JSON`  | OAuth client credentials JSON inline | Optional               |
+| `GOOGLE_OAUTH_TOKEN_FILE`        | OAuth token file path                | `./token.json`         |
+| `GOOGLE_OAUTH_TOKEN_JSON`        | OAuth token JSON inline              | Optional               |
+| `GOOGLE_OAUTH_CALLBACK_URL`      | Public OAuth callback URL            | Optional               |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path       | Optional               |
+| `GOOGLE_SERVICE_ACCOUNT_JSON`    | Service account JSON inline          | Optional               |
+| `BACKUP_RETENTION_DAYS`          | Retention in days                    | `30`                   |
+| `TEMP_BACKUP_DIR`                | Temp directory                       | `/tmp/mongodb-backups` |
+| `RUN_BACKUP_ON_START`            | Run backup on startup                | `false`                |
+| `WEB_PORT`                       | Web UI port, e.g. `8080`             | Optional               |
+| `MONGODUMP_PATH`                 | Full path to `mongodump`             | Optional               |
 
 ## Authentication
 
@@ -54,6 +54,7 @@ Use this if you want to upload to a normal Google Drive folder in your personal/
 3. For local development, place it at a path like `./secrets/oauth-credentials.json`.
 4. For Coolify/deployments without file mounts, paste the JSON into an environment variable.
 5. Set one of:
+
    ```env
    # File path (local development)
    GOOGLE_OAUTH_CREDENTIALS_FILE=./secrets/oauth-credentials.json
@@ -63,13 +64,17 @@ Use this if you want to upload to a normal Google Drive folder in your personal/
    GOOGLE_OAUTH_CREDENTIALS_JSON={"installed":{...}}
    GOOGLE_OAUTH_TOKEN_JSON={"access_token":"...","refresh_token":"...","token_type":"Bearer"}
    ```
+
    Or use both: file path for credentials, inline JSON for token.
 
    For Coolify or production, also set:
+
    ```env
    GOOGLE_OAUTH_CALLBACK_URL=https://your-domain.com/oauth2callback
    ```
+
    Make sure this URL is also added to your authorized redirect URIs in Google Cloud Console.
+
 6. Start the app and authorize it:
    - With web UI (`WEB_PORT` set): open the dashboard and click **Authorize Google Drive**
    - Without web UI: the app prints the authorization URL in the logs; complete the flow in a browser
@@ -101,6 +106,7 @@ go run ./cmd/backup --once
 ```
 
 > Local `go run` requires `mongodump` to be installed on your machine. If you don't have it, use Docker instead:
+>
 > ```bash
 > docker build -t mongo-drive-backup .
 > docker run --rm --env-file .env mongo-drive-backup --once
@@ -133,6 +139,7 @@ WEB_PORT=8080 go run ./cmd/backup
 Then open `http://localhost:8080`.
 
 The dashboard shows:
+
 - current configuration
 - last backup status and progress
 - last uploaded file and size
@@ -140,6 +147,8 @@ The dashboard shows:
 - recent log history
 - manual backup trigger
 - stop service button
+
+The dashboard is refreshed over a WebSocket at `/ws` instead of repeatedly calling `/api/status`, `/api/logs`, and `/api/backups` via `fetch` or `setInterval`. That keeps log lines and status cards push-driven and avoids continuous polling.
 
 In Coolify, expose the same `WEB_PORT` as a public port if you want to access the dashboard.
 
@@ -164,6 +173,7 @@ docker run --rm mongo-drive-backup --once
 4. Deploy.
 
 The Dockerfile includes:
+
 - Single-stage self-contained build — no Go or `mongodump` required on the host
 - `mongodump` installed via Alpine packages
 - Healthcheck on `/healthz`
