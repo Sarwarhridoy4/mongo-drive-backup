@@ -205,7 +205,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 <style>
   :root {
     --deep: #01140d;
-    --green: #78ff9a;
+    --green: #00ad2b;
     --green-soft: #baffcc;
     --green-muted: #2b8f56;
     --green-deep: #073b21;
@@ -601,8 +601,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     border: 1px solid var(--line);
     padding: 14px;
     white-space: pre-wrap;
+    overflow-y: auto;
+    overflow-x: hidden;
+    word-break: break-word;
+    overflow-wrap: break-word;
     max-height: 270px;
-    overflow: auto;
     line-height: 1.65;
     box-shadow: inset 0 0 15px rgba(120, 255, 154, 0.08);
     background-image: repeating-linear-gradient(180deg, transparent, transparent 4px, rgba(120, 255, 154, 0.03) 4px);
