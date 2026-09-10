@@ -2,6 +2,7 @@ run:
   timeout: 5m
   issues-exit-code: 1
   tests: true
+  go: "1.26"
 
 linters:
   enable:
@@ -13,6 +14,7 @@ linters:
     - gosec
     - unconvert
     - gocyclo
+    - shadow
   disable:
     - funlen
   fast: false
@@ -21,8 +23,6 @@ linters-settings:
   errcheck:
     check-type-assertions: true
     check-blank: true
-  govet:
-    check-shadowing: true
   staticcheck:
     go: "1.26"
   gocyclo:
@@ -41,6 +41,7 @@ issues:
   new: false
 
 output:
-  format: colored-line-number
+  formats:
+    - colored-line-number
   print-issued-lines: true
   print-linter-name: true
