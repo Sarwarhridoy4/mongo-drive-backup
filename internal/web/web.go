@@ -17,24 +17,25 @@ import (
 )
 
 type Server struct {
-	port         string
-	status       Status
-	statusMu     sync.RWMutex
-	triggerCh    chan struct{}
-	log          *logger.Logger
-	lastRunMu    sync.RWMutex
-	lastRunTime  time.Time
-	oauthCodeCh  chan string
-	stopCh       chan struct{}
-	restartCh    chan struct{}
-	logs         []logger.Entry
-	logsMu       sync.RWMutex
-	listBackups  func() ([]*driveapi.File, error)
-	oauthHandler *drive.OAuth2Uploader
-	oauthAuthURL string
-	oauthMu      sync.RWMutex
-	wsMu         sync.RWMutex
-	wsConns      map[*websocket.Conn]struct{}
+	port          string
+	status        Status
+	statusMu      sync.RWMutex
+	triggerCh     chan struct{}
+	log           *logger.Logger
+	lastRunMu     sync.RWMutex
+	lastRunTime   time.Time
+	oauthCodeCh   chan string
+	stopCh        chan struct{}
+	restartCh     chan struct{}
+	logs          []logger.Entry
+	logsMu        sync.RWMutex
+	listBackups   func() ([]*driveapi.File, error)
+	oauthHandler  *drive.OAuth2Uploader
+	oauthAuthURL  string
+	oauthMu       sync.RWMutex
+	wsMu          sync.RWMutex
+	wsConns       map[*websocket.Conn]struct{}
+	nextRunGetter func() (time.Time, bool)
 }
 
 func NewServer(port string, log *logger.Logger) *Server {
@@ -512,8 +513,12 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   }
 
   .backup-list {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 10px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
   }
 
   .backup-item {
@@ -544,6 +549,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
   .backup-meta {
     color: var(--muted);
+    font-size: 0.8rem;
   }
 
   .terminal-panel {
@@ -767,6 +773,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
             <div id="timezone" class="stat-value">-</div>
           </article>
           <article class="stat-card">
+            <div class="stat-label">Current Time</div>
+            <div id="current_time" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Next Run</div>
+            <div id="next_run" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
+            <div class="stat-label">Next auto backup starts in</div>
+            <div id="countdown" class="stat-value">-</div>
+          </article>
+          <article class="stat-card">
             <div class="stat-label">Last Backup</div>
             <div id="last_backup" class="stat-value">-</div>
           </article>
@@ -874,6 +892,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         document.getElementById('database').textContent = data.database || '-';
         document.getElementById('schedule').textContent = data.schedule || '-';
         document.getElementById('timezone').textContent = data.timezone || '-';
+        document.getElementById('current_time').textContent = data.current_time || '-';
+        document.getElementById('next_run').textContent = data.next_run || '-';
+        document.getElementById('countdown').textContent = data.countdown ? 'Next auto backup starts in: ' + data.countdown : '-';
         document.getElementById('last_backup').textContent = data.last_backup || '-';
         document.getElementById('last_file').textContent = data.last_file || '-';
         document.getElementById('last_size').textContent = data.last_size || '-';
@@ -892,14 +913,32 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         el.innerHTML = payload.logs.slice(-100).map(readLogLine).join('');
       }
       if (payload.type === 'backups' && Array.isArray(payload.backups)) {
-        const el = document.getElementById('backups');
-        if (!payload.backups.length) {
-          el.textContent = 'No backups found';
-          return;
-        }
-        el.innerHTML = payload.backups.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(item.mtime) + '</span></div>').join('');
+        renderBackups(payload.backups);
       }
     });
+
+    async function fetchBackups() {
+      try {
+        const res = await fetch('/api/backups');
+        if (res.status === 200) {
+          const items = await res.json();
+          renderBackups(items);
+        }
+      } catch (err) {
+        console.error('failed to fetch backups', err);
+      }
+    }
+
+    function renderBackups(items) {
+      const el = document.getElementById('backups');
+      if (!items.length) {
+        el.textContent = 'No backups found';
+        return;
+      }
+      el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(item.mtime) + '</span></div>').join('');
+    }
+
+    setTimeout(fetchBackups, 500);
 
     document.getElementById('runNow').addEventListener('click', async () => {
       const msg = document.getElementById('message');

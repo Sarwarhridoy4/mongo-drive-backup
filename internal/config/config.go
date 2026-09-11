@@ -9,43 +9,47 @@ import (
 )
 
 type Config struct {
-	AppEnv               string
-	MongoURI             string
-	MongoDatabase        string
-	BackupSchedule       string
-	BackupTimezone       string
-	DriveFolderID        string
-	SharedDriveID        string
-	ServiceAccountJSON   string
-	OAuthCredentialsFile string
-	OAuthCredentialsJSON string
-	OAuthTokenFile       string
-	OAuthTokenJSON       string
-	OAuthCallbackURL     string
-	RetentionDays        int
-	TempBackupDir        string
-	RunOnStart           bool
-	WebPort              string
+	AppEnv                     string
+	MongoURI                   string
+	MongoDatabase              string
+	BackupSchedule             string
+	BackupTimezone             string
+	DriveFolderID              string
+	SharedDriveID              string
+	ServiceAccountJSON         string
+	OAuthCredentialsFile       string
+	OAuthCredentialsJSON       string
+	OAuthTokenFile             string
+	OAuthTokenJSON             string
+	OAuthCallbackURL           string
+	OAuthCallbackURLProduction string
+	OAuthCallbackURLLocal      string
+	RetentionDays              int
+	TempBackupDir              string
+	RunOnStart                 bool
+	WebPort                    string
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		AppEnv:               getEnvOrDefault("APP_ENV", "production"),
-		MongoURI:             os.Getenv("MONGODB_URI"),
-		MongoDatabase:        os.Getenv("MONGODB_DATABASE"),
-		BackupSchedule:       getEnvOrDefault("BACKUP_SCHEDULE", "0 2 * * *"),
-		BackupTimezone:       getEnvOrDefault("BACKUP_TIMEZONE", "UTC"),
-		DriveFolderID:        os.Getenv("GOOGLE_DRIVE_FOLDER_ID"),
-		SharedDriveID:        os.Getenv("GOOGLE_SHARED_DRIVE_ID"),
-		ServiceAccountJSON:   os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
-		OAuthCredentialsFile: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_FILE"),
-		OAuthCredentialsJSON: os.Getenv("GOOGLE_OAUTH_CREDENTIALS_JSON"),
-		OAuthTokenFile:       getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "./token.json"),
-		OAuthTokenJSON:       os.Getenv("GOOGLE_OAUTH_TOKEN_JSON"),
-		OAuthCallbackURL:     os.Getenv("GOOGLE_OAUTH_CALLBACK_URL"),
-		TempBackupDir:        getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
-		RunOnStart:           getEnvBool("RUN_BACKUP_ON_START", false),
-		WebPort:              getEnvOrDefault("WEB_PORT", ""),
+		AppEnv:                     getEnvOrDefault("APP_ENV", "production"),
+		MongoURI:                   os.Getenv("MONGODB_URI"),
+		MongoDatabase:              os.Getenv("MONGODB_DATABASE"),
+		BackupSchedule:             getEnvOrDefault("BACKUP_SCHEDULE", "0 2 * * *"),
+		BackupTimezone:             getEnvOrDefault("BACKUP_TIMEZONE", "UTC"),
+		DriveFolderID:              os.Getenv("GOOGLE_DRIVE_FOLDER_ID"),
+		SharedDriveID:              os.Getenv("GOOGLE_SHARED_DRIVE_ID"),
+		ServiceAccountJSON:         os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
+		OAuthCredentialsFile:       os.Getenv("GOOGLE_OAUTH_CREDENTIALS_FILE"),
+		OAuthCredentialsJSON:       os.Getenv("GOOGLE_OAUTH_CREDENTIALS_JSON"),
+		OAuthTokenFile:             getEnvOrDefault("GOOGLE_OAUTH_TOKEN_FILE", "./token.json"),
+		OAuthTokenJSON:             os.Getenv("GOOGLE_OAUTH_TOKEN_JSON"),
+		OAuthCallbackURL:           os.Getenv("GOOGLE_OAUTH_CALLBACK_URL"),
+		OAuthCallbackURLProduction: os.Getenv("GOOGLE_OAUTH_CALLBACK_URL_PRODUCTION"),
+		OAuthCallbackURLLocal:      os.Getenv("GOOGLE_OAUTH_CALLBACK_URL_LOCAL"),
+		TempBackupDir:              getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
+		RunOnStart:                 getEnvBool("RUN_BACKUP_ON_START", false),
+		WebPort:                    getEnvOrDefault("WEB_PORT", ""),
 	}
 
 	if strings.TrimSpace(cfg.ServiceAccountJSON) == "" {
@@ -64,6 +68,16 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid BACKUP_RETENTION_DAYS: %w", err)
 		}
 		cfg.RetentionDays = n
+	}
+
+	if strings.EqualFold(cfg.AppEnv, "production") {
+		if strings.TrimSpace(cfg.OAuthCallbackURLProduction) != "" {
+			cfg.OAuthCallbackURL = cfg.OAuthCallbackURLProduction
+		}
+	} else {
+		if strings.TrimSpace(cfg.OAuthCallbackURLLocal) != "" {
+			cfg.OAuthCallbackURL = cfg.OAuthCallbackURLLocal
+		}
 	}
 
 	if err := cfg.Validate(); err != nil {

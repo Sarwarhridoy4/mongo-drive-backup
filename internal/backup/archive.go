@@ -28,7 +28,7 @@ func NewArchiver(tempDir string, log *logger.Logger) *Archiver {
 
 func GenerateBackupFilename(database string) string {
 	ts := time.Now().UTC().Format("2006-01-02-150405")
-	return fmt.Sprintf("mongodb-%s-%s.tar.gz", database, ts)
+	return fmt.Sprintf("%s-%s.tar.gz", ts, database)
 }
 
 func (a *Archiver) Compress(ctx context.Context, sourceDir, destPath string) error {
@@ -137,10 +137,13 @@ func (a *Archiver) VerifyArchive(path string) error {
 }
 
 func MatchesBackupPattern(name string) bool {
-	parts := strings.Split(name, ".")
-	if len(parts) < 1 {
+	base := strings.TrimSuffix(strings.TrimSuffix(name, ".gz"), ".tar")
+	segs := strings.Split(base, "-")
+	if len(segs) < 4 {
 		return false
 	}
-	base := parts[0]
-	return len(base) > 7 && base[:7] == "mongodb" && strings.Contains(base, "-")
+	if len(segs[0]) != 4 || len(segs[1]) != 2 || len(segs[2]) != 2 || len(segs[3]) != 6 {
+		return false
+	}
+	return true
 }

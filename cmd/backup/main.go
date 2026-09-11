@@ -42,14 +42,6 @@ func runBackup(ctx context.Context, cfg *config.Config, log *logger.Logger, webS
 	}
 	archiver := backup.NewArchiver(tempDir, log)
 
-	if webSrv != nil {
-		webSrv.SetListBackups(func() ([]*driveapi.File, error) {
-			c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			return uploader.ListFiles(c)
-		})
-	}
-
 	dumpDir, err := dumper.Dump(ctx)
 	if err != nil {
 		if webSrv != nil {
@@ -181,6 +173,14 @@ func main() {
 		os.Exit(2)
 	}
 
+	if webSrv != nil {
+		webSrv.SetListBackups(func() ([]*driveapi.File, error) {
+			c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			return uploader.ListFiles(c)
+		})
+	}
+
 	tempDir := cfg.TempBackupDir
 
 	backupJob := func(ctx context.Context) error {
@@ -266,6 +266,13 @@ func runService(ctx context.Context, cfg *config.Config, log *logger.Logger, web
 			"error": err.Error(),
 		})
 		os.Exit(1)
+	}
+
+	if webSrv != nil {
+		webSrv.SetNextRunGetter(func() (time.Time, bool) {
+			return sched.NextRun()
+		})
+		go webSrv.StartTicker(ctx)
 	}
 
 	if err := sched.Start(ctx); err != nil {

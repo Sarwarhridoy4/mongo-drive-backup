@@ -106,3 +106,13 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 
 	return s.job(ctx)
 }
+
+func (s *Scheduler) NextRun() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := s.cron.Entries()
+	if len(entries) == 0 {
+		return time.Time{}, false
+	}
+	return entries[0].Next, true
+}

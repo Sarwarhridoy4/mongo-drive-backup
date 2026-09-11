@@ -36,9 +36,9 @@ func (f *FakeUploader) Upload(ctx context.Context, path, filename string) (strin
 
 	id := fmt.Sprintf("fake-%d", len(f.uploadCalls))
 	file := &drive.File{
-		Id:    id,
-		Name:  filename,
-		Size:  1024,
+		Id:   id,
+		Name: filename,
+		Size: 1024,
 	}
 	f.files[id] = file
 	return id, 1024, nil

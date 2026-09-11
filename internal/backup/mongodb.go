@@ -54,7 +54,7 @@ func (m *mongoDumper) Verify() error {
 
 func (m *mongoDumper) Dump(ctx context.Context) (string, error) {
 	ts := time.Now().UTC().Format("2006-01-02-150405")
-	dumpDir := filepath.Join(m.outDir, fmt.Sprintf("mongodb-%s-%s", m.database, ts))
+	dumpDir := filepath.Join(m.outDir, fmt.Sprintf("%s-%s", ts, m.database))
 
 	if err := os.MkdirAll(dumpDir, 0755); err != nil {
 		return "", fmt.Errorf("create dump dir: %w", err)

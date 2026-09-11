@@ -225,7 +225,7 @@ Backups must have predictable timestamp-based names.
 Example:
 
 ```text
-mongodb-mydb-2026-09-08-020000.tar.gz
+2026-09-08-020000-mydb.tar.gz
 ```
 
 Recommended timestamp format:
@@ -257,7 +257,7 @@ tar
    ↓
 gzip
    ↓
-mongodb-database-YYYY-MM-DD-HHMMSS.tar.gz
+YYYY-MM-DD-HHMMSS-database.tar.gz
 ```
 
 The archive should preserve the MongoDB dump directory structure.
@@ -286,7 +286,7 @@ The uploaded file should use the generated backup filename.
 Example:
 
 ```text
-mongodb-himulingua-2026-09-08-020000.tar.gz
+2026-09-08-020000-himulingua.tar.gz
 ```
 
 The upload should:
@@ -301,7 +301,7 @@ Example log:
 
 ```text
 backup completed
-file=mongodb-himulingua-2026-09-08-020000.tar.gz
+file=2026-09-08-020000-himulingua.tar.gz
 drive_file_id=abc123
 size=184MB
 duration=42s
@@ -539,7 +539,7 @@ Example:
 {
   "level": "info",
   "event": "backup_completed",
-  "file": "mongodb-mydb-2026-09-08-020000.tar.gz",
+  "file": "2026-09-08-020000-mydb.tar.gz",
   "duration_seconds": 42
 }
 ```

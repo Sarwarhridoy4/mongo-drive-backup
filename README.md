@@ -21,6 +21,8 @@ Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanu
 
 The built-in web dashboard is served when `WEB_PORT` is configured. It uses a WebSocket (`/ws`) stream for push-driven updates so the page receives `status`, `logs`, and `backups` payloads automatically. This avoids the need for browser fetch polling or manual refresh loops.
 
+The dashboard displays live time/date and a countdown timer labeled **Next auto backup starts in: hh:mm:ss**, updated every second.
+
 The OAuth authorize button is also now wired to the token status endpoint. If a valid refresh token is already available in `GOOGLE_OAUTH_TOKEN_FILE` or `GOOGLE_OAUTH_TOKEN_JSON`, the button is disabled automatically and the page reflects that the token is already authorized.
 
 ## Environment Variables
@@ -38,7 +40,8 @@ The OAuth authorize button is also now wired to the token status endpoint. If a 
 | `GOOGLE_OAUTH_CREDENTIALS_JSON`  | OAuth client credentials JSON inline | Optional               |
 | `GOOGLE_OAUTH_TOKEN_FILE`        | OAuth token file path                | `./token.json`         |
 | `GOOGLE_OAUTH_TOKEN_JSON`        | OAuth token JSON inline              | Optional               |
-| `GOOGLE_OAUTH_CALLBACK_URL`      | Public OAuth callback URL            | Optional               |
+| `GOOGLE_OAUTH_CALLBACK_URL_PRODUCTION` | Production OAuth callback URL | Optional |
+| `GOOGLE_OAUTH_CALLBACK_URL_LOCAL`      | Local OAuth callback URL      | Optional |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service account JSON file path       | Optional               |
 | `GOOGLE_SERVICE_ACCOUNT_JSON`    | Service account JSON inline          | Optional               |
 | `BACKUP_RETENTION_DAYS`          | Retention in days                    | `30`                   |
@@ -71,15 +74,16 @@ Use this if you want to upload to a normal Google Drive folder in your personal/
    GOOGLE_OAUTH_TOKEN_JSON={"access_token":"...","refresh_token":"...","token_type":"Bearer"}
    ```
 
-   Or use both: file path for credentials, inline JSON for token.
+    Or use both: file path for credentials, inline JSON for token.
 
-   For Coolify or production, also set:
+    For Coolify or production, also set:
 
-   ```env
-   GOOGLE_OAUTH_CALLBACK_URL=https://your-domain.com/oauth2callback
-   ```
+    ```env
+    GOOGLE_OAUTH_CALLBACK_URL_PRODUCTION=https://your-domain.com/oauth2callback
+    GOOGLE_OAUTH_CALLBACK_URL_LOCAL=http://localhost:8080/oauth2callback
+    ```
 
-   Make sure this URL is also added to your authorized redirect URIs in Google Cloud Console.
+    The app automatically selects the callback URL based on `APP_ENV`. Make sure the selected URL is also added to your authorized redirect URIs in Google Cloud Console.
 
 6. Start the app and authorize it:
    - With web UI (`WEB_PORT` set): open the dashboard and click **Authorize Google Drive**
@@ -166,6 +170,9 @@ The dashboard shows:
 - recent log history
 - manual backup trigger
 - stop service button
+- live current time and date
+- next scheduled run time
+- countdown timer showing **Next auto backup starts in: hh:mm:ss**
 
 The dashboard is refreshed over a WebSocket at `/ws` instead of repeatedly calling `/api/status`, `/api/logs`, and `/api/backups` via `fetch` or `setInterval`. That keeps log lines and status cards push-driven and avoids continuous polling.
 

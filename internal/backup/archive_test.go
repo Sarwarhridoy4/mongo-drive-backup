@@ -15,14 +15,14 @@ import (
 
 func TestGenerateBackupFilename(t *testing.T) {
 	filename := GenerateBackupFilename("mydb")
-	expected := "mongodb-mydb-" + time.Now().UTC().Format("2006-01-02-150405") + ".tar.gz"
+	expected := time.Now().UTC().Format("2006-01-02-150405") + "-mydb.tar.gz"
 
 	if filename != expected {
 		t.Errorf("expected %s, got %s", expected, filename)
 	}
 
-	if !strings.HasPrefix(filename, "mongodb-mydb-") {
-		t.Errorf("filename should start with mongodb-mydb-")
+	if !strings.HasPrefix(filename, time.Now().UTC().Format("2006-01-02-150405")+"-mydb") {
+		t.Errorf("filename should start with timestamp-db")
 	}
 	if !strings.HasSuffix(filename, ".tar.gz") {
 		t.Errorf("filename should end with .tar.gz")
@@ -35,7 +35,7 @@ func TestMatchesBackupPattern(t *testing.T) {
 		input    string
 		expected bool
 	}{
-		{"valid backup", "mongodb-mydb-2026-09-08-020000.tar.gz", true},
+		{"valid backup", "2026-09-08-020000-mydb.tar.gz", true},
 		{"missing prefix", "mydb-2026-09-08-020000.tar.gz", false},
 		{"too short", "abc.tar.gz", false},
 		{"empty", "", false},

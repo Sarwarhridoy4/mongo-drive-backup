@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -15,7 +16,9 @@ type Status struct {
 	Database    string `json:"database"`
 	Schedule    string `json:"schedule"`
 	Timezone    string `json:"timezone"`
+	CurrentTime string `json:"current_time,omitempty"`
 	NextRun     string `json:"next_run,omitempty"`
+	Countdown   string `json:"countdown,omitempty"`
 	LastBackup  string `json:"last_backup"`
 	LastStatus  string `json:"last_status"`
 	LastError   string `json:"last_error,omitempty"`
@@ -95,7 +98,7 @@ func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	s.lastRunMu.Unlock()
 
 	s.statusMu.Lock()
-	s.status.LastBackup = s.lastRunTime.Format(time.RFC3339)
+	s.status.LastBackup = s.lastRunTime.Format("02 Jan 2006 15:04:05 -0700")
 	s.status.LastFile = file
 	s.status.LastSize = formatBytes(size)
 	s.status.Progress = ""
@@ -128,4 +131,49 @@ func (s *Server) SetProgress(progress string) {
 	s.statusMu.Unlock()
 
 	s.broadcastStatus()
+}
+
+func (s *Server) SetNextRunGetter(getter func() (time.Time, bool)) {
+	s.nextRunGetter = getter
+}
+
+func (s *Server) updateTimeStatus() {
+	now := time.Now()
+	s.statusMu.Lock()
+	s.status.CurrentTime = now.Format("02 Jan 2006 15:04:05 -0700")
+	if s.nextRunGetter != nil {
+		if next, ok := s.nextRunGetter(); ok {
+			s.status.NextRun = next.Format("02 Jan 2006 15:04:05 -0700")
+			d := next.Sub(now)
+			if d < 0 {
+				d = 0
+			}
+			s.status.Countdown = formatDuration(d)
+		} else {
+			s.status.NextRun = ""
+			s.status.Countdown = ""
+		}
+	}
+	s.statusMu.Unlock()
+	s.broadcastStatus()
+}
+
+func formatDuration(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	sec := int(d.Seconds()) % 60
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, sec)
+}
+
+func (s *Server) StartTicker(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.updateTimeStatus()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
