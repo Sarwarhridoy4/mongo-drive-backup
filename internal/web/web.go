@@ -751,7 +751,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
           <h1 class="dashboard-title">MongoDB Google Drive Backup</h1>
           <p class="dashboard-subtitle">Service dashboard</p>
         </div>
-        <div class="service-chip">online</div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button id="tzToggle" class="action-button" style="padding: 8px 12px; font-size: 0.8rem;">UTC</button>
+          <div class="service-chip">online</div>
+        </div>
       </section>
 
       <section class="panel">
@@ -840,11 +843,51 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   </div>
 
   <script>
+    let displayTimezone = localStorage.getItem('displayTimezone') || 'utc';
+
     function statusClass(status) {
       if (status === 'success') return 'stat-value success';
       if (status === 'failed') return 'stat-value error';
       if (status === 'running') return 'stat-value running';
       return 'stat-value';
+    }
+
+    function pad2(n) {
+      return String(n).padStart(2, '0');
+    }
+
+    function formatISODate(isoString, tz) {
+      if (!isoString) return '-';
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return isoString || '-';
+      let d, m, y, h, min, s, tzLabel;
+      if (tz === 'utc') {
+        d = date.getUTCDate();
+        m = date.getUTCMonth() + 1;
+        y = date.getUTCFullYear();
+        h = date.getUTCHours();
+        min = date.getUTCMinutes();
+        s = date.getUTCSeconds();
+        tzLabel = 'UTC';
+      } else {
+        const utcMs = date.getTime() + (date.getTimezoneOffset() * 60000);
+        const local6 = new Date(utcMs + (3600000 * 6));
+        d = local6.getUTCDate();
+        m = local6.getUTCMonth() + 1;
+        y = local6.getUTCFullYear();
+        h = local6.getUTCHours();
+        min = local6.getUTCMinutes();
+        s = local6.getUTCSeconds();
+        tzLabel = '+0600';
+      }
+      return pad2(d) + ' ' + pad2(m) + ' ' + y + ' ' + pad2(h) + ':' + pad2(min) + ':' + pad2(s) + ' ' + tzLabel;
+    }
+
+    function updateTimeElement(elementId, isoValue) {
+      const el = document.getElementById(elementId);
+      if (el) {
+        el.textContent = formatISODate(isoValue, displayTimezone);
+      }
     }
 
     function escapeHtml(value) {
@@ -858,6 +901,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       const fields = line.fields || {};
       const fieldText = Object.keys(fields).length ? ' ' + JSON.stringify(fields, null, 2) : '';
       return '<span class="log-line"><span class="log-level">[' + escapeHtml(ts) + '] ' + escapeHtml(level) + '</span> ' + escapeHtml(event) + escapeHtml(fieldText) + '</span>';
+    }
+
+    const tzToggle = document.getElementById('tzToggle');
+    if (tzToggle) {
+      tzToggle.textContent = displayTimezone === 'utc' ? 'UTC' : 'Local (UTC+6)';
+      tzToggle.addEventListener('click', () => {
+        displayTimezone = displayTimezone === 'utc' ? 'local' : 'utc';
+        localStorage.setItem('displayTimezone', displayTimezone);
+        tzToggle.textContent = displayTimezone === 'utc' ? 'UTC' : 'Local (UTC+6)';
+      });
     }
 
     const authorizeButton = document.getElementById('authorizeDrive');
@@ -892,10 +945,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         document.getElementById('database').textContent = data.database || '-';
         document.getElementById('schedule').textContent = data.schedule || '-';
         document.getElementById('timezone').textContent = data.timezone || '-';
-        document.getElementById('current_time').textContent = data.current_time || '-';
-        document.getElementById('next_run').textContent = data.next_run || '-';
+        updateTimeElement('current_time', data.current_time);
+        updateTimeElement('next_run', data.next_run);
         document.getElementById('countdown').textContent = data.countdown ? 'Next auto backup starts in: ' + data.countdown : '-';
-        document.getElementById('last_backup').textContent = data.last_backup || '-';
+        updateTimeElement('last_backup', data.last_backup);
         document.getElementById('last_file').textContent = data.last_file || '-';
         document.getElementById('last_size').textContent = data.last_size || '-';
         document.getElementById('last_error').textContent = data.last_error || '-';
@@ -935,7 +988,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         el.textContent = 'No backups found';
         return;
       }
-      el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(item.mtime) + '</span></div>').join('');
+      el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(formatISODate(item.mtime, displayTimezone)) + '</span></div>').join('');
     }
 
     setTimeout(fetchBackups, 500);

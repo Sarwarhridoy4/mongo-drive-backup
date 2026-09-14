@@ -98,7 +98,7 @@ func (s *Server) UpdateBackupResult(file string, size int64, err error) {
 	s.lastRunMu.Unlock()
 
 	s.statusMu.Lock()
-	s.status.LastBackup = s.lastRunTime.Format("02 Jan 2006 15:04:05 -0700")
+	s.status.LastBackup = s.lastRunTime.Format(time.RFC3339)
 	s.status.LastFile = file
 	s.status.LastSize = formatBytes(size)
 	s.status.Progress = ""
@@ -140,10 +140,10 @@ func (s *Server) SetNextRunGetter(getter func() (time.Time, bool)) {
 func (s *Server) updateTimeStatus() {
 	now := time.Now()
 	s.statusMu.Lock()
-	s.status.CurrentTime = now.Format("02 Jan 2006 15:04:05 -0700")
+	s.status.CurrentTime = now.Format(time.RFC3339)
 	if s.nextRunGetter != nil {
 		if next, ok := s.nextRunGetter(); ok {
-			s.status.NextRun = next.Format("02 Jan 2006 15:04:05 -0700")
+			s.status.NextRun = next.Format(time.RFC3339)
 			d := next.Sub(now)
 			if d < 0 {
 				d = 0
