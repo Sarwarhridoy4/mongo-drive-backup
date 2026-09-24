@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/pflag v1.0.10
-	google.golang.org/api v0.297.0
+	google.golang.org/api v0.298.0
 )
 
 require (
