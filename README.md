@@ -4,9 +4,40 @@ Production-ready Go service that periodically backs up a MongoDB database and up
 
 ## Architecture
 
-```text
-Scheduler -> MongoDB dump -> Compress -> Google Drive upload -> Verify -> Cleanup -> Log
+```mermaid
+flowchart LR
+    Config[Environment configuration] --> App[Go backup service]
+    Schedule[Scheduler] --> App
+    Manual[Dashboard / API trigger] --> App
+
+    subgraph Backup[Backup workflow]
+        App --> Dump[mongodump]
+        Dump --> Archive[Create compressed archive]
+        Archive --> Upload[Upload to Google Drive]
+        Upload --> Verify[Verify upload]
+        Verify --> Retention[Apply retention policy]
+        Retention --> Cleanup[Remove temporary files]
+    end
+
+    Mongo[(MongoDB)] --> Dump
+    Upload --> Drive[(Google Drive)]
+    App --> Logs[Structured logs]
+    App --> State[Dashboard status]
+    State --> WS[WebSocket /ws]
+    WS --> Browser[Web dashboard]
+
+    subgraph Restore[Restore workflow]
+        Browser --> RestoreRequest[Authenticated restore request]
+        RestoreRequest --> Download[Download archive from Drive]
+        Download --> SafeExtract[Validate and extract archive]
+        SafeExtract --> Mongorestore[mongorestore --drop]
+        Mongorestore --> Target[(Target MongoDB)]
+    end
 ```
+
+The scheduler and dashboard can trigger the same backup job. Backup progress, logs, and Drive
+contents are pushed to connected dashboard clients over WebSocket; restore requests follow a
+separate authenticated path and never persist MongoDB connection URLs.
 
 ## Requirements
 
