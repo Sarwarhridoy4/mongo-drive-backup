@@ -85,8 +85,8 @@ backup/scheduler context and gracefully shuts down the web listener, releasing `
 | `WEB_PORT`                       | Web UI port, e.g. `8080`             | Optional               |
 | `WEB_USERNAME`                   | Optional dashboard login username | Optional |
 | `WEB_PASSWORD`                   | Optional dashboard login password; configure with `WEB_USERNAME` | Optional |
-| `MONGODUMP_PATH`                 | Full path to `mongodump`             | Optional               |
-| `MONGORESTORE_PATH`              | Full path to `mongorestore`          | Optional               |
+| `MONGODUMP_PATH`                 | Full path to `mongodump`             | `/usr/bin/mongodump`   |
+| `MONGORESTORE_PATH`              | Full path to `mongorestore`          | `/usr/bin/mongorestore` |
 
 ## Authentication
 
@@ -176,12 +176,25 @@ go tool cover -func=coverage.out
 > docker run --rm --env-file .env mongo-drive-backup --once
 > ```
 
-The service also supports an explicit local tool path through `MONGODUMP_PATH`. This is useful
-when MongoDB Database Tools are extracted without root access:
+The Docker image installs MongoDB Database Tools through Alpine packages and exposes the tools at
+`/usr/bin/mongodump` and `/usr/bin/mongorestore`. The image also verifies both binaries during the
+build. Keep these values in the production environment:
+
+```env
+MONGODUMP_PATH=/usr/bin/mongodump
+MONGORESTORE_PATH=/usr/bin/mongorestore
+```
+
+For local development without system-wide installation, the service supports an explicit extracted
+tool path:
 
 ```env
 MONGODUMP_PATH=./.tools/mongodb-database-tools/usr/bin/mongodump
+MONGORESTORE_PATH=./.tools/mongodb-database-tools/usr/bin/mongorestore
 ```
+
+Do not use the relative `.tools` paths in a Docker or Coolify environment. That directory is excluded
+from the Docker build context, and relative paths depend on the container's working directory.
 
 For a complete step-by-step run guide, see [How to run.md](How%20to%20run.md).
 
@@ -260,7 +273,8 @@ rejects unsafe archive paths, and runs `mongorestore --drop` so matching target 
 replaced before import. MongoDB URLs are never written to logs or persisted by the service.
 
 This is destructive and should only be used after verifying the selected backup and target
-database. Set `MONGORESTORE_PATH` only when `mongorestore` is not available on `PATH`.
+database. In Docker/Coolify, use `/usr/bin/mongorestore`, which is installed by the image, or leave
+the variable empty to resolve `mongorestore` from `PATH`.
 
 The dashboard is refreshed over a WebSocket at `/ws` instead of repeatedly calling `/api/status`, `/api/logs`, and `/api/backups` via `fetch` or `setInterval`. That keeps log lines and status cards push-driven and avoids continuous polling.
 
@@ -317,6 +331,10 @@ The Dockerfile includes:
 ## Troubleshooting
 
 - Verify `mongodump` is available inside the container: `docker run --rm <image> mongodump --version`
+- Verify `mongorestore` is available inside the container: `docker run --rm <image> mongorestore --version`
+- If either tool is reported missing, check that `MONGODUMP_PATH` and `MONGORESTORE_PATH` are not
+  pointing to the local relative `.tools` directory; use `/usr/bin/mongodump` and
+  `/usr/bin/mongorestore` in production.
 - Check container logs in Coolify.
 - For service account uploads, ensure you are using a Shared Drive.
 - For OAuth, make sure `token.json` was generated and is readable. If not, use the **Authorize Google Drive** button in the web UI, or check the logs for the authorization URL.

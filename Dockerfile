@@ -22,6 +22,8 @@ RUN apk add --no-cache \
     && addgroup -S -g 1000 appgroup \
     && adduser -S -D -H -u 1000 -G appgroup appuser \
     && mkdir -p /app /tmp/mongodb-backups \
+    && test -x /usr/bin/mongodump \
+    && test -x /usr/bin/mongorestore \
     && chown -R appuser:appgroup /app /tmp/mongodb-backups
 
 WORKDIR /app
@@ -29,7 +31,9 @@ WORKDIR /app
 COPY --from=builder --chown=appuser:appgroup /out/backup /app/backup
 
 ENV WEB_PORT=8080 \
-    TEMP_BACKUP_DIR=/tmp/mongodb-backups
+    TEMP_BACKUP_DIR=/tmp/mongodb-backups \
+    MONGODUMP_PATH=/usr/bin/mongodump \
+    MONGORESTORE_PATH=/usr/bin/mongorestore
 
 USER appuser
 
