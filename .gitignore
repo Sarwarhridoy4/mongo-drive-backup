@@ -13,6 +13,7 @@ vendor/
 *.json
 credentials/
 secrets/
+.tools/
 
 # IDE
 .idea/

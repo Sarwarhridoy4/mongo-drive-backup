@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	driveapi "google.golang.org/api/drive/v3"
@@ -13,6 +15,7 @@ import (
 	"github.com/sarwar/mongo-drive-backup/internal/config"
 	"github.com/sarwar/mongo-drive-backup/internal/drive"
 	"github.com/sarwar/mongo-drive-backup/internal/logger"
+	"github.com/sarwar/mongo-drive-backup/internal/restore"
 	"github.com/sarwar/mongo-drive-backup/internal/scheduler"
 	"github.com/sarwar/mongo-drive-backup/internal/web"
 
@@ -107,7 +110,10 @@ func main() {
 	pflag.BoolVarP(&once, "once", "o", false, "Run a single backup and exit")
 	pflag.Parse()
 
-	_ = godotenv.Load()
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "environment file error: %v\n", err)
+		os.Exit(2)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -118,12 +124,16 @@ func main() {
 	log := logger.New(cfg.AppEnv, nil)
 
 	log.Info("service_started", map[string]interface{}{
-		"env": cfg.AppEnv,
+		"env":      cfg.AppEnv,
+		"web_port": cfg.WebPort,
 	})
 
 	var webSrv *web.Server
 	if cfg.WebPort != "" {
 		webSrv = web.NewServer(cfg.WebPort, log)
+		if cfg.WebUsername != "" && cfg.WebPassword != "" {
+			webSrv.SetBasicAuth(cfg.WebUsername, cfg.WebPassword)
+		}
 		webSrv.SetConfig(web.Status{
 			Environment: cfg.AppEnv,
 			MongoURI:    cfg.MongoURI,
@@ -179,6 +189,12 @@ func main() {
 			defer cancel()
 			return uploader.ListFiles(c)
 		})
+		if downloader, ok := uploader.(drive.DriveDownloader); ok {
+			restoreService := restore.NewService(downloader, cfg.TempBackupDir, os.Getenv("MONGORESTORE_PATH"), log)
+			webSrv.SetRestoreHandler(func(ctx context.Context, request web.RestoreRequest) error {
+				return restoreService.Restore(ctx, request.FileID, request.MongoURI, request.Database, request.Confirmation)
+			})
+		}
 	}
 
 	tempDir := cfg.TempBackupDir
@@ -188,13 +204,30 @@ func main() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signalCh)
+	go func() {
+		select {
+		case sig := <-signalCh:
+			log.Info("shutdown_requested", map[string]interface{}{"signal": sig.String()})
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
 	if webSrv != nil {
+		log.Info("web_server_starting", map[string]interface{}{
+			"port": cfg.WebPort,
+		})
 		go func() {
 			if err := webSrv.Start(); err != nil {
 				log.Error("web_server_failed", map[string]interface{}{
+					"port":  cfg.WebPort,
 					"error": err.Error(),
+					"hint":  "stop the process using this port or set WEB_PORT to another available port",
 				})
+				cancel()
 			}
 		}()
 
@@ -228,9 +261,23 @@ func main() {
 		}()
 	}
 
-	go runService(ctx, cfg, log, webSrv, uploader, oauthHandler, once)
+	go func() {
+		runService(ctx, cfg, log, webSrv, uploader, oauthHandler, once)
+		if once {
+			cancel()
+		}
+	}()
 
 	<-ctx.Done()
+	if webSrv != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := webSrv.Shutdown(shutdownCtx); err != nil {
+			log.Error("web_server_shutdown_failed", map[string]interface{}{"error": err.Error()})
+		} else {
+			log.Info("web_server_stopped", nil)
+		}
+	}
 }
 
 func runService(ctx context.Context, cfg *config.Config, log *logger.Logger, webSrv *web.Server, uploader drive.DriveUploader, oauthHandler *drive.OAuth2Uploader, once bool) {

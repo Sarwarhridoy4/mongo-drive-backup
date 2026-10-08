@@ -22,6 +22,10 @@ type DriveUploader interface {
 	DeleteFile(ctx context.Context, fileID string) error
 }
 
+type DriveDownloader interface {
+	Download(ctx context.Context, fileID, destination string) error
+}
+
 type Uploader struct {
 	folderID      string
 	sharedDriveID string
@@ -157,6 +161,32 @@ func (u *Uploader) DeleteFile(ctx context.Context, fileID string) error {
 		return fmt.Errorf("delete drive file: %w", err)
 	}
 
+	return nil
+}
+
+func (u *Uploader) Download(ctx context.Context, fileID, destination string) error {
+	var err error
+	service, err := drive.NewService(ctx, option.WithCredentialsJSON(u.creds))
+	if err != nil {
+		return fmt.Errorf("create drive service: %w", err)
+	}
+	call := service.Files.Get(fileID).Context(ctx)
+	if u.sharedDriveID != "" {
+		call = call.SupportsAllDrives(true)
+	}
+	response, err := call.Download()
+	if err != nil {
+		return fmt.Errorf("download drive file: %w", err)
+	}
+	defer response.Body.Close()
+	f, err := os.Create(destination)
+	if err != nil {
+		return fmt.Errorf("create restore archive: %w", err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, response.Body); err != nil {
+		return fmt.Errorf("save restore archive: %w", err)
+	}
 	return nil
 }
 
@@ -305,6 +335,31 @@ func (o *OAuth2Uploader) DeleteFile(ctx context.Context, fileID string) error {
 		return fmt.Errorf("delete drive file: %w", err)
 	}
 
+	return nil
+}
+
+func (o *OAuth2Uploader) Download(ctx context.Context, fileID, destination string) error {
+	service, err := o.newService(ctx)
+	if err != nil {
+		return err
+	}
+	call := service.Files.Get(fileID).Context(ctx)
+	if o.sharedDriveID != "" {
+		call = call.SupportsAllDrives(true)
+	}
+	response, err := call.Download()
+	if err != nil {
+		return fmt.Errorf("download drive file: %w", err)
+	}
+	defer response.Body.Close()
+	f, err := os.Create(destination)
+	if err != nil {
+		return fmt.Errorf("create restore archive: %w", err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, response.Body); err != nil {
+		return fmt.Errorf("save restore archive: %w", err)
+	}
 	return nil
 }
 

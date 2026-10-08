@@ -1,10 +1,22 @@
 .git
 .gitignore
-README.md
 .env
-.env.example
+.env.*
 *.json
 credentials/
 secrets/
+token.json
+
+bin/
+dist/
+tmp/
+temp/
+*.log
+*.out
+coverage.*
+
 .idea/
 .vscode/
+README.md
+"How to run.md"
+"How to get Google Credentials.md"

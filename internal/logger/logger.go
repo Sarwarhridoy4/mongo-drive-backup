@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ const (
 	colorGreen  = "\033[32m"
 	colorYellow = "\033[33m"
 	colorCyan   = "\033[36m"
+	colorBlue   = "\033[34m"
 	colorGray   = "\033[90m"
 )
 
@@ -76,35 +78,53 @@ func (l *Logger) log(level Level, event string, fields map[string]interface{}) {
 	}
 
 	levelColor := colorCyan
+	levelIcon := "·"
 	switch level {
 	case LevelError:
 		levelColor = colorRed
+		levelIcon = "✕"
 	case LevelWarn:
 		levelColor = colorYellow
+		levelIcon = "!"
 	case LevelInfo:
 		levelColor = colorGreen
+		levelIcon = "✓"
+	case LevelDebug:
+		levelColor = colorBlue
+		levelIcon = "·"
 	}
 
 	timestamp := entry.Time.Format("15:04:05")
-	prefix := fmt.Sprintf("%s[%s] %s%s", colorGray, timestamp, levelColor, strings.ToUpper(entry.Level))
+	levelText := strings.ToUpper(entry.Level)
+	prefix := fmt.Sprintf("%s[%s]%s %-5s%s", colorGray, timestamp, levelColor, levelText, colorReset)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s%s %s%s\n", prefix, colorReset, colorCyan, event))
+	sb.WriteString(fmt.Sprintf("%s %s%s%s %s\n", prefix, levelColor, levelIcon, colorReset, humanizeEvent(event)))
 
 	if len(entry.Fields) > 0 {
-		sb.WriteString(fmt.Sprintf("  %s│%s ", colorGray, colorReset))
-		first := true
-		for _, v := range entry.Fields {
-			if !first {
-				sb.WriteString(fmt.Sprintf("  %s·%s ", colorGray, colorReset))
-			}
-			sb.WriteString(fmt.Sprintf("%s=%s%v", colorYellow, colorReset, v))
-			first = false
+		keys := make([]string, 0, len(entry.Fields))
+		for key := range entry.Fields {
+			keys = append(keys, key)
 		}
-		sb.WriteString("\n")
+		sort.Strings(keys)
+		for _, key := range keys {
+			sb.WriteString(fmt.Sprintf("  %s│%s %s%s%s %v\n", colorGray, colorReset, colorYellow, key, colorReset, entry.Fields[key]))
+		}
 	}
 
 	l.logger.Print(sb.String())
+}
+
+func humanizeEvent(event string) string {
+	words := strings.Fields(strings.ReplaceAll(event, "_", " "))
+	if len(words) == 0 {
+		return "event"
+	}
+	for i := range words {
+		words[i] = strings.ToLower(words[i])
+	}
+	words[0] = strings.ToUpper(words[0][:1]) + words[0][1:]
+	return strings.Join(words, " ")
 }
 
 func (l *Logger) Info(event string, fields map[string]interface{}) {

@@ -28,6 +28,8 @@ type Config struct {
 	TempBackupDir              string
 	RunOnStart                 bool
 	WebPort                    string
+	WebUsername                string
+	WebPassword                string
 }
 
 func Load() (*Config, error) {
@@ -50,6 +52,8 @@ func Load() (*Config, error) {
 		TempBackupDir:              getEnvOrDefault("TEMP_BACKUP_DIR", "/tmp/mongodb-backups"),
 		RunOnStart:                 getEnvBool("RUN_BACKUP_ON_START", false),
 		WebPort:                    getEnvOrDefault("WEB_PORT", ""),
+		WebUsername:                os.Getenv("WEB_USERNAME"),
+		WebPassword:                os.Getenv("WEB_PASSWORD"),
 	}
 
 	if strings.TrimSpace(cfg.ServiceAccountJSON) == "" {
@@ -101,6 +105,9 @@ func (c *Config) Validate() error {
 	}
 	if strings.TrimSpace(c.ServiceAccountJSON) == "" && strings.TrimSpace(c.OAuthCredentialsFile) == "" && strings.TrimSpace(c.OAuthCredentialsJSON) == "" {
 		missing = append(missing, "GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_OAUTH_CREDENTIALS_FILE, or GOOGLE_OAUTH_CREDENTIALS_JSON")
+	}
+	if (strings.TrimSpace(c.WebUsername) == "") != (strings.TrimSpace(c.WebPassword) == "") {
+		return fmt.Errorf("WEB_USERNAME and WEB_PASSWORD must be configured together")
 	}
 
 	if len(missing) > 0 {

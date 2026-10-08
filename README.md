@@ -25,6 +25,10 @@ The dashboard displays live time/date and a countdown timer labeled **Next auto 
 
 The OAuth authorize button is also now wired to the token status endpoint. If a valid refresh token is already available in `GOOGLE_OAUTH_TOKEN_FILE` or `GOOGLE_OAUTH_TOKEN_JSON`, the button is disabled automatically and the page reflects that the token is already authorized.
 
+The dashboard includes a **Stop Service** control. Stopping the service cancels the active
+backup/scheduler context and gracefully shuts down the web listener, releasing `WEB_PORT`.
+`--once` mode also exits automatically after the single backup completes.
+
 ## Environment Variables
 
 | Variable                         | Description                          | Default                |
@@ -48,7 +52,10 @@ The OAuth authorize button is also now wired to the token status endpoint. If a 
 | `TEMP_BACKUP_DIR`                | Temp directory                       | `/tmp/mongodb-backups` |
 | `RUN_BACKUP_ON_START`            | Run backup on startup                | `false`                |
 | `WEB_PORT`                       | Web UI port, e.g. `8080`             | Optional               |
+| `WEB_USERNAME`                   | Optional dashboard login username | Optional |
+| `WEB_PASSWORD`                   | Optional dashboard login password; configure with `WEB_USERNAME` | Optional |
 | `MONGODUMP_PATH`                 | Full path to `mongodump`             | Optional               |
+| `MONGORESTORE_PATH`              | Full path to `mongorestore`          | Optional               |
 
 ## Authentication
 
@@ -115,6 +122,9 @@ go mod download
 go run ./cmd/backup --once
 ```
 
+The `--once` command performs one backup and exits. Use `go run ./cmd/backup` for the long-running
+scheduler and dashboard.
+
 ## Testing
 
 ```bash
@@ -135,6 +145,13 @@ go tool cover -func=coverage.out
 > docker run --rm --env-file .env mongo-drive-backup --once
 > ```
 
+The service also supports an explicit local tool path through `MONGODUMP_PATH`. This is useful
+when MongoDB Database Tools are extracted without root access:
+
+```env
+MONGODUMP_PATH=./.tools/mongodb-database-tools/usr/bin/mongodump
+```
+
 For a complete step-by-step run guide, see [How to run.md](How%20to%20run.md).
 
 For Google credential setup, see [How to get Google Credentials.md](How%20to%20get%20Google%20Credentials.md).
@@ -148,8 +165,18 @@ For Google credential setup, see [How to get Google Credentials.md](How%20to%20g
 ## Running Locally
 
 ```bash
-go run ./cmd/backup
+./run.sh
 ```
+
+`run.sh` builds a temporary binary, forwards Ctrl+C/SIGTERM to the service, waits for graceful
+shutdown, and removes the temporary binary. You can pass application flags through it:
+
+```bash
+./run.sh --once
+```
+
+You can also run `go run ./cmd/backup` directly; the application handles SIGINT and SIGTERM and
+shuts down the dashboard listener before exiting.
 
 ## Web UI
 
@@ -161,6 +188,24 @@ WEB_PORT=8080 go run ./cmd/backup
 
 Then open `http://localhost:8080`.
 
+When `WEB_USERNAME` and `WEB_PASSWORD` are configured, the browser displays a traditional sign-in
+page and creates a secure HttpOnly session cookie. For local access, `http://127.0.0.1:8080` can be
+used if `localhost` is affected by a browser proxy or cached connection state.
+
+### Local dashboard login
+
+The local `.env` contains the dashboard credentials. Read them from that file; they are intentionally
+not repeated here or committed to source control:
+
+```text
+WEB_USERNAME=<local username>
+WEB_PASSWORD=<local password>
+```
+
+These values are for local development only. Change both `WEB_USERNAME` and `WEB_PASSWORD` to
+strong deployment-specific values before exposing the dashboard publicly. The login page includes
+a **Sign out** link, and `/healthz` remains available without authentication for health checks.
+
 The dashboard shows:
 
 - current configuration
@@ -170,13 +215,44 @@ The dashboard shows:
 - recent log history
 - manual backup trigger
 - stop service button
+- restore backup control with destructive confirmation
 - live current time and date
 - next scheduled run time
 - countdown timer showing **Next auto backup starts in: hh:mm:ss**
 
+### Restore a backup
+
+Authenticated dashboard users can restore a Google Drive backup from the **Restore a backup**
+panel. Select a backup, enter the target MongoDB URL and database name, then type `RESTORE` and
+confirm the browser warning. The service downloads the archive to a private temporary workspace,
+rejects unsafe archive paths, and runs `mongorestore --drop` so matching target collections are
+replaced before import. MongoDB URLs are never written to logs or persisted by the service.
+
+This is destructive and should only be used after verifying the selected backup and target
+database. Set `MONGORESTORE_PATH` only when `mongorestore` is not available on `PATH`.
+
 The dashboard is refreshed over a WebSocket at `/ws` instead of repeatedly calling `/api/status`, `/api/logs`, and `/api/backups` via `fetch` or `setInterval`. That keeps log lines and status cards push-driven and avoids continuous polling.
 
 In Coolify, expose the same `WEB_PORT` as a public port if you want to access the dashboard.
+
+If the configured port is already in use, stop the previous service instance or choose another
+port for the new instance:
+
+```bash
+WEB_PORT=8081 go run ./cmd/backup
+```
+
+Only run one instance per port. The startup log reports the active port and a bind failure includes
+the exact port and a suggested resolution.
+
+### Dashboard security
+
+If the dashboard is reachable outside a private network, configure both `WEB_USERNAME` and
+`WEB_PASSWORD`. The web server then protects the dashboard, API, WebSocket, and OAuth routes
+with a login session while leaving `/healthz` available for deployment health checks. The server
+also applies a strict per-request Content Security Policy, security headers, and same-origin
+checks for state-changing requests. Keep `WEB_PASSWORD` in the deployment secret store and do
+not commit it to source control.
 
 ## Manual Backup
 
@@ -200,11 +276,12 @@ docker run --rm mongo-drive-backup --once
 
 The Dockerfile includes:
 
-- Single-stage self-contained build — no Go or `mongodump` required on the host
+- Multi-stage build with a small Alpine runtime image — no Go or `mongodump` required on the host
 - `mongodump` installed via Alpine packages
 - Healthcheck on `/healthz`
 - Web UI with manual **Authorize Google Drive** button for OAuth
-- Non-root runtime user
+- Non-root runtime user and a SIGTERM stop signal for graceful shutdown
+- Docker build context exclusions for environment files, credentials, tokens, and local artifacts
 
 ## Troubleshooting
 
@@ -212,8 +289,16 @@ The Dockerfile includes:
 - Check container logs in Coolify.
 - For service account uploads, ensure you are using a Shared Drive.
 - For OAuth, make sure `token.json` was generated and is readable. If not, use the **Authorize Google Drive** button in the web UI, or check the logs for the authorization URL.
+- If the browser reports that `localhost:8080` cannot be reached, confirm the service is running and check for a port conflict with `lsof -nP -iTCP:8080 -sTCP:LISTEN`. Use `127.0.0.1` or another free `WEB_PORT` when needed.
+- Use the dashboard **Stop Service** button to shut down the scheduler and release the web port cleanly.
 - Ensure `BACKUP_TIMEZONE` is a valid Go/ZoneInfo timezone such as `UTC` or `Asia/Dhaka`.
 - Watch the logs for `mongodb_dump_failed`, `drive_upload_failed`, or scheduler errors.
+
+## Logging
+
+Development logs use a readable structured terminal format with timestamps, severity indicators,
+human-readable event names, and sorted fields. Production logs are emitted as structured JSON for
+log aggregation. Credentials and connection strings must not be written to logs.
 
 ## Security Notes
 

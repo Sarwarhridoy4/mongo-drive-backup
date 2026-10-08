@@ -1,31 +1,44 @@
-FROM golang:1.26-alpine
+FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache \
-    mongodb-tools \
-    ca-certificates \
-    tzdata \
-    wget \
-    git
-
-WORKDIR /app
+WORKDIR /src
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/backup ./cmd/backup
+RUN CGO_ENABLED=0 go build \
+    -trimpath \
+    -ldflags='-s -w' \
+    -o /out/backup \
+    ./cmd/backup
 
-RUN addgroup -g 1000 -S appgroup && \
-    adduser -u 1000 -S appuser -G appgroup && \
-    chown -R appuser:appgroup /app
+FROM alpine:3.22
 
-USER appuser
+RUN apk add --no-cache \
+    ca-certificates \
+    mongodb-tools \
+    tzdata \
+    wget \
+    && addgroup -S -g 1000 appgroup \
+    && adduser -S -D -H -u 1000 -G appgroup appuser \
+    && mkdir -p /app /tmp/mongodb-backups \
+    && chown -R appuser:appgroup /app /tmp/mongodb-backups
 
 WORKDIR /app
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:${WEB_PORT:-8080}/healthz || exit 1
+COPY --from=builder --chown=appuser:appgroup /out/backup /app/backup
 
-EXPOSE ${WEB_PORT:-8080}
+ENV WEB_PORT=8080 \
+    TEMP_BACKUP_DIR=/tmp/mongodb-backups
+
+USER appuser
+
+STOPSIGNAL SIGTERM
+
+# The application serves /healthz without dashboard authentication.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD wget -qO- "http://127.0.0.1:${WEB_PORT}/healthz" || exit 1
+
+EXPOSE 8080
 
 ENTRYPOINT ["/app/backup"]

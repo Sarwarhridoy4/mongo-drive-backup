@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,25 +18,32 @@ import (
 )
 
 type Server struct {
-	port          string
-	status        Status
-	statusMu      sync.RWMutex
-	triggerCh     chan struct{}
-	log           *logger.Logger
-	lastRunMu     sync.RWMutex
-	lastRunTime   time.Time
-	oauthCodeCh   chan string
-	stopCh        chan struct{}
-	restartCh     chan struct{}
-	logs          []logger.Entry
-	logsMu        sync.RWMutex
-	listBackups   func() ([]*driveapi.File, error)
-	oauthHandler  *drive.OAuth2Uploader
-	oauthAuthURL  string
-	oauthMu       sync.RWMutex
-	wsMu          sync.RWMutex
-	wsConns       map[*websocket.Conn]struct{}
-	nextRunGetter func() (time.Time, bool)
+	port           string
+	status         Status
+	statusMu       sync.RWMutex
+	triggerCh      chan struct{}
+	log            *logger.Logger
+	lastRunMu      sync.RWMutex
+	lastRunTime    time.Time
+	oauthCodeCh    chan string
+	stopCh         chan struct{}
+	restartCh      chan struct{}
+	logs           []logger.Entry
+	logsMu         sync.RWMutex
+	listBackups    func() ([]*driveapi.File, error)
+	oauthHandler   *drive.OAuth2Uploader
+	oauthAuthURL   string
+	oauthMu        sync.RWMutex
+	authMu         sync.RWMutex
+	authUsername   string
+	authPassword   string
+	authSessions   map[string]time.Time
+	wsMu           sync.RWMutex
+	wsConns        map[*websocket.Conn]struct{}
+	nextRunGetter  func() (time.Time, bool)
+	restoreHandler func(context.Context, RestoreRequest) error
+	httpMu         sync.RWMutex
+	httpServer     *http.Server
 }
 
 func NewServer(port string, log *logger.Logger) *Server {
@@ -53,7 +61,8 @@ func NewServer(port string, log *logger.Logger) *Server {
 			Timezone:    "UTC",
 			LastStatus:  "idle",
 		},
-		wsConns: make(map[*websocket.Conn]struct{}),
+		wsConns:      make(map[*websocket.Conn]struct{}),
+		authSessions: make(map[string]time.Time),
 	}
 	log.AddHook(s.appendLog)
 	return s
@@ -73,6 +82,19 @@ func (s *Server) OAuthAuthURL() string {
 	s.oauthMu.RLock()
 	defer s.oauthMu.RUnlock()
 	return s.oauthAuthURL
+}
+
+// SetBasicAuth configures the dashboard login credentials.
+// It is intentionally opt-in so local development remains frictionless.
+func (s *Server) SetBasicAuth(username, password string) {
+	s.authMu.Lock()
+	s.authUsername = username
+	s.authPassword = password
+	s.authMu.Unlock()
+}
+
+func (s *Server) SetRestoreHandler(handler func(context.Context, RestoreRequest) error) {
+	s.restoreHandler = handler
 }
 
 func (s *Server) Trigger() <-chan struct{} {
@@ -151,12 +173,15 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/login", s.handleLogin)
+	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/favicon.svg", s.handleFavicon)
 	mux.HandleFunc("/logo.svg", s.handleLogo)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/backup/now", s.handleBackupNow)
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/restart", s.handleRestart)
+	mux.HandleFunc("/api/restore", s.handleRestore)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/backups", s.handleBackups)
 	mux.HandleFunc("/api/oauth/status", s.handleOAuthStatus)
@@ -173,20 +198,26 @@ func (s *Server) Start() error {
 		"port": s.port,
 	})
 
-	return http.ListenAndServe(":"+s.port, secureHeaders(mux))
+	httpServer := &http.Server{Addr: ":" + s.port, Handler: s.secureHeaders(mux)}
+	s.httpMu.Lock()
+	s.httpServer = httpServer
+	s.httpMu.Unlock()
+
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("listen on port %s: %w", s.port, err)
+	}
+	return nil
 }
 
-func secureHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' https://drive.google.com data:; connect-src 'self' ws: wss:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		next.ServeHTTP(w, r)
-	})
+// Shutdown stops the dashboard listener and allows active requests to finish.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.httpMu.RLock()
+	httpServer := s.httpServer
+	s.httpMu.RUnlock()
+	if httpServer == nil {
+		return nil
+	}
+	return httpServer.Shutdown(ctx)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -202,21 +233,23 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>MongoDB Backup Service</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-<script src="https://cdn.tailwindcss.com"></script>
 <style>
   :root {
-    --deep: #01140d;
-    --green: #00ad2b;
-    --green-soft: #baffcc;
-    --green-muted: #2b8f56;
-    --green-deep: #073b21;
-    --line: #69d793;
-    --line-soft: #9affba;
-    --panel: #021f15;
-    --panel-soft: #032917;
-    --text: var(--green-soft);
-    --muted: var(--green);
-    --subtle: var(--green-muted);
+    --deep: #07111f;
+    --deep-2: #0b1728;
+    --green: #6ee7b7;
+    --green-soft: #d1fae5;
+    --green-muted: #7c93ad;
+    --green-deep: #123a38;
+    --line: #223754;
+    --line-soft: #31516d;
+    --panel: #0d1b2e;
+    --panel-soft: #12243a;
+    --panel-bg: rgba(13, 27, 46, 0.86);
+    --border: rgba(145, 175, 204, 0.18);
+    --text: #e6f0f8;
+    --muted: #9bb0c5;
+    --subtle: #71879e;
     --primary: var(--green);
     --primary-2: var(--green-soft);
   }
@@ -228,36 +261,37 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   body {
     margin: 0;
     font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
-    background: var(--deep);
+    background: radial-gradient(circle at 15% 0%, #122a3b 0, transparent 34%), var(--deep);
     color: var(--text);
     min-height: 100vh;
+    letter-spacing: 0.01em;
   }
 
   .dashboard-wrap {
-    max-width: 1440px;
+    max-width: 1540px;
     margin: 0 auto;
-    padding: 24px 16px 40px;
+    padding: 32px 24px 48px;
   }
 
   .dashboard-shell {
     display: flex;
-    gap: 16px;
+    gap: 24px;
     min-height: calc(100vh - 80px);
   }
 
   .dashboard-grid {
     display: grid;
     grid-template-columns: minmax(280px, 0.95fr) minmax(420px, 1.45fr);
-    gap: 16px;
+    gap: 20px;
   }
 
   .sidebar {
-    width: 250px;
+    width: 252px;
     background: var(--panel-bg);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 16px 14px;
-    box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+    border-radius: 20px;
+    padding: 20px 14px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.22);
     flex-shrink: 0;
   }
 
@@ -275,11 +309,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--green);
-    color: var(--deep);
+    background: linear-gradient(135deg, #a7f3d0, #34d399);
+    color: #06221d;
     font-weight: 900;
     font-size: 1.1rem;
-    box-shadow: 0 0 22px rgba(120, 255, 154, 0.45);
+    box-shadow: 0 8px 24px rgba(52, 211, 153, 0.24);
   }
 
   .brand-name {
@@ -320,22 +354,28 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   .nav-link.active,
   .nav-link:hover {
     color: var(--text);
-    border-color: var(--line-soft);
-    background: var(--panel-soft);
+    border-color: rgba(110, 231, 183, 0.3);
+    background: linear-gradient(90deg, rgba(110, 231, 183, 0.13), transparent);
   }
 
   .nav-link .nav-icon {
     width: 8px;
     height: 8px;
     border-radius: 50%;
+    background: var(--subtle);
+  }
+
+  .nav-link.active .nav-icon,
+  .nav-link:hover .nav-icon {
     background: var(--green);
+    box-shadow: 0 0 0 4px rgba(110, 231, 183, 0.12);
   }
 
   .sidebar-card {
-    border: 1px solid var(--line-soft);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px;
-    background: var(--panel-soft);
+    background: rgba(18, 36, 58, 0.7);
     color: var(--muted);
     font-size: 0.78rem;
     margin-top: 14px;
@@ -343,6 +383,21 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
   .sidebar-card strong {
     color: var(--text);
+  }
+
+  .sign-out {
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-decoration: none;
+  }
+
+  .sign-out-wrap {
+    margin-top: 10px;
+  }
+
+  .sign-out:hover {
+    color: var(--green-soft);
+    text-decoration: underline;
   }
 
   .main-panel {
@@ -355,18 +410,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     background: var(--panel-bg);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 16px 18px;
+    border-radius: 20px;
+    padding: 22px 24px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.2);
   }
 
   .dashboard-title {
     margin: 0 0 4px;
     font-size: clamp(1.7rem, 2.5vw, 2.4rem);
-    font-weight: 800;
+    font-weight: 750;
     line-height: 1.2;
   }
 
@@ -382,11 +437,22 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     gap: 8px;
     padding: 8px 12px;
     border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--panel-soft);
+    border: 1px solid rgba(110, 231, 183, 0.22);
+    background: rgba(110, 231, 183, 0.08);
     font-size: 0.86rem;
     color: var(--muted);
     white-space: nowrap;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .timezone-button {
+    padding: 8px 12px;
+    font-size: 0.8rem;
   }
 
   .service-chip::before {
@@ -399,33 +465,33 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   }
 
   .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 20px;
-    margin-bottom: 16px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.24);
+    background: linear-gradient(145deg, rgba(13, 27, 46, 0.96), rgba(10, 23, 39, 0.9));
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 22px;
+    margin-bottom: 20px;
+    box-shadow: 0 18px 45px rgba(0,0,0,0.18);
   }
 
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
     gap: 14px;
   }
 
   .stat-card {
     background: var(--panel-soft);
-    border: 1px solid var(--line);
+    border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 14px;
-    min-height: 88px;
+    padding: 16px;
+    min-height: 96px;
     display: flex;
     flex-direction: column;
     justify-content: center;
   }
 
   .stat-label {
-    color: var(--muted);
+    color: var(--subtle);
     font-size: 0.78rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -437,6 +503,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     font-weight: 700;
     font-size: 1rem;
     color: var(--text);
+    font-variant-numeric: tabular-nums;
     word-break: break-word;
   }
 
@@ -465,16 +532,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     border: 0;
     color: var(--deep);
     padding: 11px 16px;
-    border-radius: 12px;
+    border-radius: 10px;
     font-weight: 800;
     font-size: 0.9rem;
     cursor: pointer;
-    transition: transform 180ms ease, filter 180ms ease, opacity 180ms ease;
+    transition: transform 180ms ease, filter 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
     background: var(--green);
+    box-shadow: 0 8px 18px rgba(52, 211, 153, 0.14);
   }
 
   .action-button:hover {
     filter: brightness(1.08);
+    transform: translateY(-1px);
   }
 
   .action-button:focus-visible {
@@ -493,17 +562,60 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   }
 
   .action-button.restart {
-    background: var(--green-muted);
-    color: var(--green-soft);
+    background: #203651;
+    color: var(--text);
+    box-shadow: none;
+  }
+
+  .action-button.stop {
+    background: #4b2630;
+    color: #fecdd3;
+    box-shadow: none;
   }
 
   .action-button.authorize {
-    background: var(--green-soft);
+    background: #b8f5dd;
   }
 
   .message {
     color: var(--muted);
     font-size: 0.86rem;
+  }
+
+  .restore-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  .restore-form label {
+    display: block;
+    color: var(--subtle);
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .restore-form input,
+  .restore-form select {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 12px;
+    background: #081523;
+    color: var(--text);
+    font: inherit;
+  }
+
+  .restore-form .full {
+    grid-column: 1 / -1;
+  }
+
+  .restore-warning {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: #fecdd3;
+    font-size: 0.82rem;
   }
 
   .panel-title {
@@ -529,8 +641,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     color: var(--text);
     font-size: 0.86rem;
     word-break: break-all;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
   }
 
   .backup-item:last-child {
@@ -553,8 +665,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
   }
 
   .terminal-panel {
-    background: var(--deep);
-    border-color: var(--line-soft);
+    background: #091523;
+    border-color: var(--border);
   }
 
   .terminal-head {
@@ -563,7 +675,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     justify-content: space-between;
     gap: 12px;
     padding: 0 0 12px;
-    border-bottom: 1px solid rgba(129, 140, 248, 0.34);
+    border-bottom: 1px solid var(--border);
   }
 
   .terminal-title {
@@ -604,7 +716,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     color: var(--text);
     background: var(--deep);
     border-radius: 10px;
-    border: 1px solid var(--line);
+    border: 1px solid var(--border);
     padding: 14px;
     white-space: pre-wrap;
     overflow-y: auto;
@@ -613,13 +725,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     overflow-wrap: break-word;
     max-height: 270px;
     line-height: 1.65;
-    box-shadow: inset 0 0 15px rgba(120, 255, 154, 0.08);
-    background-image: repeating-linear-gradient(180deg, transparent, transparent 4px, rgba(120, 255, 154, 0.03) 4px);
+    box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.24);
+    background-image: linear-gradient(180deg, rgba(110, 231, 183, 0.025), transparent 30%);
   }
 
   .log-line {
     display: block;
-    border-bottom: 1px dotted var(--line);
+    border-bottom: 1px dotted rgba(145, 175, 204, 0.2);
     padding: 2px 0;
   }
 
@@ -661,6 +773,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
     .dashboard-grid {
       grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+      grid-template-columns: repeat(2, minmax(200px, 1fr));
     }
   }
 
@@ -742,6 +858,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       <div class="sidebar-card">
         <div><strong>Service:</strong> MongoDB</div>
         <div><strong>Target:</strong> Google Drive</div>
+        <div class="sign-out-wrap"><a class="sign-out" href="/logout">Sign out</a></div>
       </div>
     </aside>
 
@@ -751,8 +868,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
           <h1 class="dashboard-title">MongoDB Google Drive Backup</h1>
           <p class="dashboard-subtitle">Service dashboard</p>
         </div>
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <button id="tzToggle" class="action-button" style="padding: 8px 12px; font-size: 0.8rem;">UTC</button>
+        <div class="topbar-actions">
+          <button id="tzToggle" class="action-button timezone-button">UTC</button>
           <div class="service-chip">online</div>
         </div>
       </section>
@@ -817,8 +934,21 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       <section class="actions">
         <button id="runNow" class="action-button run">Run Backup Now</button>
         <button id="restartNow" class="action-button restart">Restart Service</button>
+        <button id="stopNow" class="action-button stop">Stop Service</button>
         <button id="authorizeDrive" class="action-button authorize">Authorize Google Drive</button>
         <span id="message" class="message"></span>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Restore a backup</h2>
+        <p class="restore-warning">Destructive operation: matching collections will be replaced. Type RESTORE to continue.</p>
+        <form id="restoreForm" class="restore-form">
+          <div class="full"><label for="restoreBackup">Google Drive backup</label><select id="restoreBackup" required><option value="">Load backups first</option></select></div>
+          <div><label for="restoreURI">MongoDB URL</label><input id="restoreURI" type="password" autocomplete="off" placeholder="mongodb://..." required></div>
+          <div><label for="restoreDatabase">Database name</label><input id="restoreDatabase" type="text" autocomplete="off" placeholder="mydatabase" required></div>
+          <div><label for="restoreConfirmation">Confirmation</label><input id="restoreConfirmation" type="text" autocomplete="off" placeholder="RESTORE" required></div>
+          <div><button id="restoreSubmit" class="action-button stop" type="submit">Restore and replace database</button></div>
+        </form>
       </section>
 
       <section class="dashboard-grid">
@@ -947,7 +1077,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         document.getElementById('timezone').textContent = data.timezone || '-';
         updateTimeElement('current_time', data.current_time);
         updateTimeElement('next_run', data.next_run);
-        document.getElementById('countdown').textContent = data.countdown ? 'Next auto backup starts in: ' + data.countdown : '-';
+        document.getElementById('countdown').textContent = data.countdown || '-';
         updateTimeElement('last_backup', data.last_backup);
         document.getElementById('last_file').textContent = data.last_file || '-';
         document.getElementById('last_size').textContent = data.last_size || '-';
@@ -984,12 +1114,42 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
     function renderBackups(items) {
       const el = document.getElementById('backups');
+      const restoreSelect = document.getElementById('restoreBackup');
+      if (restoreSelect) {
+        restoreSelect.innerHTML = '<option value="">Select a backup</option>' + items.map(item => '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.name) + '</option>').join('');
+      }
       if (!items.length) {
         el.textContent = 'No backups found';
         return;
       }
       el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(formatISODate(item.mtime, displayTimezone)) + '</span></div>').join('');
     }
+
+    document.getElementById('restoreForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submit = document.getElementById('restoreSubmit');
+      if (!window.confirm('This will replace matching collections in the target database. Continue?')) return;
+      submit.disabled = true;
+      const msg = document.getElementById('message');
+      msg.textContent = 'Restoring backup...';
+      try {
+        const res = await fetch('/api/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_id: document.getElementById('restoreBackup').value,
+            mongo_uri: document.getElementById('restoreURI').value,
+            database: document.getElementById('restoreDatabase').value,
+            confirmation: document.getElementById('restoreConfirmation').value
+          })
+        });
+        msg.textContent = res.ok ? 'Restore completed.' : 'Restore failed: ' + (await res.text());
+      } catch (err) {
+        msg.textContent = 'Restore failed: ' + err.message;
+      } finally {
+        submit.disabled = false;
+      }
+    });
 
     setTimeout(fetchBackups, 500);
 
@@ -1015,6 +1175,24 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       }
     });
 
+    document.getElementById('stopNow').addEventListener('click', async () => {
+      const msg = document.getElementById('message');
+      const button = document.getElementById('stopNow');
+      button.disabled = true;
+      msg.textContent = 'Stopping service...';
+      try {
+        const res = await fetch('/api/stop', { method: 'POST' });
+        if (res.status === 202) {
+          msg.textContent = 'Stop signal sent. The service will shut down shortly.';
+        } else {
+          msg.textContent = 'Failed: ' + (await res.text());
+          button.disabled = false;
+        }
+      } catch (err) {
+        msg.textContent = 'Service stopped or unavailable.';
+      }
+    });
+
     document.getElementById('authorizeDrive').addEventListener('click', async () => {
       const msg = document.getElementById('message');
       msg.textContent = 'Starting authorization...';
@@ -1036,6 +1214,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 </html>`
 
 	w.Header().Set("Content-Type", "text/html")
+	nonce := requestNonce(r)
+	html = addCSPNonce(html, nonce)
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy(nonce))
 	_, _ = w.Write([]byte(html))
 }
 

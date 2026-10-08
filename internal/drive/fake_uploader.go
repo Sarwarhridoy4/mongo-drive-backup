@@ -65,6 +65,10 @@ func (f *FakeUploader) DeleteFile(ctx context.Context, fileID string) error {
 	return nil
 }
 
+func (f *FakeUploader) Download(ctx context.Context, fileID, destination string) error {
+	return fmt.Errorf("fake download not implemented for %s", fileID)
+}
+
 func (f *FakeUploader) SetListError(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

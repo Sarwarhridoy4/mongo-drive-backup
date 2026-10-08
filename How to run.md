@@ -37,7 +37,10 @@ TEMP_BACKUP_DIR=/tmp/mongodb-backups
 RUN_BACKUP_ON_START=false
 WEB_PORT=
 MONGODUMP_PATH=
+MONGORESTORE_PATH=
 GOOGLE_OAUTH_CALLBACK_URL=
+WEB_USERNAME=
+WEB_PASSWORD=
 ```
 
 For service account + Shared Drive:
@@ -92,14 +95,20 @@ After approval, the token is saved to `token.json` automatically.
 ### Run a single backup and exit
 
 ```bash
-go run ./cmd/backup --once
+./run.sh --once
 ```
+
+`--once` exits automatically after the backup completes. The wrapper forwards Ctrl+C/SIGTERM to
+the service and removes its temporary binary.
 
 ### Run the scheduler normally
 
 ```bash
-go run ./cmd/backup
+./run.sh
 ```
+
+You can also run `go run ./cmd/backup` directly; the application handles SIGINT and SIGTERM and
+gracefully shuts down the scheduler and web listener.
 
 ### Enable the built-in web UI
 
@@ -115,6 +124,10 @@ Then visit:
 http://localhost:8080
 ```
 
+When `WEB_USERNAME` and `WEB_PASSWORD` are configured, the dashboard first shows a sign-in page.
+The current local credentials are stored only in `.env`; never commit them. Use
+`http://127.0.0.1:8080` if a browser proxy or cached localhost state causes connection retries.
+
 The dashboard is a live WebSocket page that pushes the current `status`, `logs`, and `backups` snapshots over `/ws`. It receives new events without polling or manual reloads.
 
 The dashboard shows:
@@ -125,7 +138,13 @@ The dashboard shows:
 - recent log history
 - manual backup trigger
 - stop service button
+- restore backup control; it requires selecting a backup, entering a MongoDB URL and database,
+  and typing `RESTORE`
 - OAuth authorize control that becomes disabled automatically when a valid OAuth refresh token already exists
+
+The restore flow is destructive. It downloads the selected Drive archive to a private temporary
+directory and runs `mongorestore --drop`, replacing matching collections in the target database.
+It rejects unsafe archive paths and does not log or persist the MongoDB URL.
 
 ## 5. Docker build and run
 
@@ -147,13 +166,17 @@ docker run --rm --env-file .env mongo-drive-backup --once
 docker run --rm --env-file .env -p 8080:8080 mongo-drive-backup
 ```
 
-The Dockerfile exposes `WEB_PORT` through an `ARG` and `EXPOSE` declaration.
+The Dockerfile uses a multi-stage build, runs as a non-root user, installs `mongodump` and
+`mongorestore`, exposes port `8080`, and provides a public `/healthz` health check. Set
+`WEB_PORT` to another value only when publishing and configuring the matching container port.
 
 ## 6. Production deployment notes
 
 - Keep Google credentials out of source control.
 - Use environment secrets in Coolify or another deployment platform.
 - If you want the UI available in Coolify, expose the same port via `WEB_PORT`.
+- Configure both `WEB_USERNAME` and `WEB_PASSWORD` for any publicly reachable dashboard.
+- Use the dashboard **Stop Service** button to release the listener cleanly.
 - The service writes temporary dump and archive files in `TEMP_BACKUP_DIR`; they are cleaned after the archive completes and the file is uploaded.
 - The Docker image includes a healthcheck on `/healthz` for Coolify.
 
@@ -163,6 +186,7 @@ The Dockerfile exposes `WEB_PORT` through an `ARG` and `EXPOSE` declaration.
 - Confirm that the Google account or service account has edit permission for the Google Drive folder.
 - For service accounts, use a Shared Drive; normal My Drive folders will fail with `storageQuotaExceeded`.
 - For OAuth, make sure `token.json` was generated and is readable. If not, use the **Authorize Google Drive** button in the web UI, or check the logs for the authorization URL.
+- If port `8080` is already in use, inspect it with `lsof -nP -iTCP:8080 -sTCP:LISTEN` and stop the old service or choose another port.
 - If the OAuth callback shows `localhost` in the browser, set `GOOGLE_OAUTH_CALLBACK_URL` to your public Coolify URL, and add that same URL to your authorized redirect URIs in Google Cloud Console.
 - Ensure `BACKUP_TIMEZONE` is a valid Go/ZoneInfo timezone such as `UTC` or `Asia/Dhaka`.
 - Watch the logs for `mongodb_dump_failed`, `drive_upload_failed`, or scheduler errors.
