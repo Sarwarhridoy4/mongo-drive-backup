@@ -2,11 +2,10 @@ package web
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -113,25 +112,11 @@ func (s *Server) RestartCh() <-chan struct{} {
 	return s.restartCh
 }
 
-func findAssetPath(name string) string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return name
-	}
+//go:embed assets/favicon.svg
+var faviconSVG []byte
 
-	for {
-		candidate := filepath.Join(wd, name)
-		if _, statErr := os.Stat(candidate); statErr == nil {
-			return candidate
-		}
-		parent := filepath.Dir(wd)
-		if parent == wd {
-			break
-		}
-		wd = parent
-	}
-	return name
-}
+//go:embed assets/logo.svg
+var logoSVG []byte
 
 func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -139,16 +124,9 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	iconPath := findAssetPath("favicon.svg")
-	data, err := os.ReadFile(iconPath)
-	if err != nil {
-		http.Error(w, "favicon not found", http.StatusNotFound)
-		return
-	}
-
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = w.Write(data)
+	_, _ = w.Write(faviconSVG)
 }
 
 func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
@@ -157,16 +135,9 @@ func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	iconPath := findAssetPath("logo.svg")
-	data, err := os.ReadFile(iconPath)
-	if err != nil {
-		http.Error(w, "logo not found", http.StatusNotFound)
-		return
-	}
-
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = w.Write(data)
+	_, _ = w.Write(logoSVG)
 }
 
 func (s *Server) Start() error {

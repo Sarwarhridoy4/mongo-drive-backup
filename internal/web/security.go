@@ -40,7 +40,7 @@ func addCSPNonce(html, nonce string) string {
 
 func (s *Server) secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" && r.URL.Path != "/login" {
+		if r.URL.Path != "/healthz" && r.URL.Path != "/login" && r.URL.Path != "/favicon.svg" && r.URL.Path != "/logo.svg" {
 			s.authMu.RLock()
 			authEnabled := s.authUsername != "" || s.authPassword != ""
 			s.authMu.RUnlock()

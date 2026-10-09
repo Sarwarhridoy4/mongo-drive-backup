@@ -120,3 +120,59 @@ func TestHandleFaviconShouldServeSVGIcon(t *testing.T) {
 		t.Fatal("expected favicon SVG payload")
 	}
 }
+
+func TestHandleLogoShouldServeSVGIcon(t *testing.T) {
+	server := NewServer("8080", logger.New("production", io.Discard))
+	req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleLogo(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "image/svg+xml") {
+		t.Fatalf("expected SVG logo content type, got %q", got)
+	}
+	if body := resp.Body.String(); !strings.Contains(body, "<svg") {
+		t.Fatal("expected logo SVG payload")
+	}
+}
+
+func TestLoginPageShouldUseLogoAsset(t *testing.T) {
+	server := NewServer("8080", logger.New("production", io.Discard))
+	server.SetBasicAuth("admin", "secret")
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleLogin(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", resp.Code)
+	}
+	if !strings.Contains(resp.Body.String(), `<img class="mark" src="/logo.svg"`) {
+		t.Fatal("login page should use the shared logo asset")
+	}
+	if !strings.Contains(resp.Body.String(), `<link rel="icon" type="image/svg+xml" href="/favicon.svg">`) {
+		t.Fatal("login page should declare the shared favicon asset")
+	}
+}
+
+func TestLogoAssetShouldRemainPublicWhenAuthIsEnabled(t *testing.T) {
+	server := NewServer("8080", logger.New("production", io.Discard))
+	server.SetBasicAuth("admin", "secret")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/logo.svg", server.handleLogo)
+	handler := server.secureHeaders(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("logo asset should be public, got status %d", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "image/svg+xml") {
+		t.Fatalf("expected SVG logo content type, got %q", got)
+	}
+}

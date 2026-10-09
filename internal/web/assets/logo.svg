@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="32" fill="#01140d" />
+
+  <!-- simple stacked-disk backup symbol -->
+  <ellipse cx="120" cy="170" rx="52" ry="28" fill="none" stroke="#69d793" stroke-width="3" />
+  <ellipse cx="120" cy="154" rx="52" ry="28" fill="none" stroke="#baffcc" stroke-width="2" />
+  <ellipse cx="120" cy="138" rx="52" ry="28" fill="none" stroke="#69d793" stroke-width="2" />
+
+  <!-- leaf / backup flow -->
+  <path d="M128 42 C93 69 88 113 106 140 C118 158 128 163 128 176 C128 160 141 154 152 140 C172 113 168 73 128 42 Z" fill="#78ff9a" />
+
+  <!-- small arrow showing backup movement -->
+  <path d="M151 170 C170 163 188 163 204 169" fill="none" stroke="#baffcc" stroke-width="5" stroke-linecap="round" />
+  <path d="M198 160 L207 169 L194 176" fill="none" stroke="#baffcc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
