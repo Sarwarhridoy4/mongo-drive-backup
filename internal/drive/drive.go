@@ -165,6 +165,9 @@ func (u *Uploader) DeleteFile(ctx context.Context, fileID string) error {
 }
 
 func (u *Uploader) Download(ctx context.Context, fileID, destination string) error {
+	if fileID == "" {
+		return fmt.Errorf("drive file id is required")
+	}
 	var err error
 	service, err := drive.NewService(ctx, option.WithCredentialsJSON(u.creds))
 	if err != nil {
@@ -185,6 +188,7 @@ func (u *Uploader) Download(ctx context.Context, fileID, destination string) err
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, response.Body); err != nil {
+		_ = os.Remove(destination)
 		return fmt.Errorf("save restore archive: %w", err)
 	}
 	return nil
@@ -339,6 +343,9 @@ func (o *OAuth2Uploader) DeleteFile(ctx context.Context, fileID string) error {
 }
 
 func (o *OAuth2Uploader) Download(ctx context.Context, fileID, destination string) error {
+	if fileID == "" {
+		return fmt.Errorf("drive file id is required")
+	}
 	service, err := o.newService(ctx)
 	if err != nil {
 		return err
@@ -358,6 +365,7 @@ func (o *OAuth2Uploader) Download(ctx context.Context, fileID, destination strin
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, response.Body); err != nil {
+		_ = os.Remove(destination)
 		return fmt.Errorf("save restore archive: %w", err)
 	}
 	return nil

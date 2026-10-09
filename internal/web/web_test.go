@@ -49,6 +49,25 @@ func TestHandleIndexShouldExposeWebSocketMonitor(t *testing.T) {
 	}
 }
 
+func TestHandleIndexShouldExposeMongoDBURLVisibilityToggle(t *testing.T) {
+	server := NewServer("8080", logger.New("production", io.Discard))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp := httptest.NewRecorder()
+
+	server.handleIndex(resp, req)
+
+	body := resp.Body.String()
+	for _, expected := range []string{
+		`id="restoreURIToggle"`,
+		`aria-label="Show MongoDB URL"`,
+		`input.type = visible ? 'password' : 'text'`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("index page should contain MongoDB URL visibility control %q", expected)
+		}
+	}
+}
+
 func TestUpdateBackupResultBroadcastsStatusSnapshot(t *testing.T) {
 	server := NewServer("8080", logger.New("production", io.Discard))
 	mux := http.NewServeMux()

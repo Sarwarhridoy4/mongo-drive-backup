@@ -607,6 +607,33 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
     font: inherit;
   }
 
+  .secret-input {
+    display: flex;
+    align-items: stretch;
+  }
+
+  .secret-input input {
+    min-width: 0;
+    border-radius: 10px 0 0 10px;
+  }
+
+  .secret-toggle {
+    border: 1px solid var(--border);
+    border-left: 0;
+    border-radius: 0 10px 10px 0;
+    padding: 0 12px;
+    background: #102235;
+    color: var(--subtle);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .secret-toggle:hover,
+  .secret-toggle:focus-visible {
+    color: var(--text);
+    outline: none;
+  }
+
   .restore-form .full {
     grid-column: 1 / -1;
   }
@@ -944,7 +971,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
         <p class="restore-warning">Destructive operation: matching collections will be replaced. Type RESTORE to continue.</p>
         <form id="restoreForm" class="restore-form">
           <div class="full"><label for="restoreBackup">Google Drive backup</label><select id="restoreBackup" required><option value="">Load backups first</option></select></div>
-          <div><label for="restoreURI">MongoDB URL</label><input id="restoreURI" type="password" autocomplete="off" placeholder="mongodb://..." required></div>
+          <div><label for="restoreURI">MongoDB URL</label><div class="secret-input"><input id="restoreURI" type="password" autocomplete="off" placeholder="mongodb://..." required><button id="restoreURIToggle" class="secret-toggle" type="button" aria-label="Show MongoDB URL" aria-pressed="false">Show</button></div></div>
           <div><label for="restoreDatabase">Database name</label><input id="restoreDatabase" type="text" autocomplete="off" placeholder="mydatabase" required></div>
           <div><label for="restoreConfirmation">Confirmation</label><input id="restoreConfirmation" type="text" autocomplete="off" placeholder="RESTORE" required></div>
           <div><button id="restoreSubmit" class="action-button stop" type="submit">Restore and replace database</button></div>
@@ -1124,6 +1151,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
       }
       el.innerHTML = items.map(item => '<div class="backup-item"><a href="https://drive.google.com/open?id=' + encodeURIComponent(item.id) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.name) + '</a><span class="backup-meta">(' + escapeHtml(item.size) + ')</span><span class="backup-meta">' + escapeHtml(formatISODate(item.mtime, displayTimezone)) + '</span></div>').join('');
     }
+
+    document.getElementById('restoreURIToggle').addEventListener('click', () => {
+      const input = document.getElementById('restoreURI');
+      const toggle = document.getElementById('restoreURIToggle');
+      const visible = input.type === 'text';
+      input.type = visible ? 'password' : 'text';
+      toggle.textContent = visible ? 'Show' : 'Hide';
+      toggle.setAttribute('aria-label', visible ? 'Show MongoDB URL' : 'Hide MongoDB URL');
+      toggle.setAttribute('aria-pressed', String(!visible));
+    });
 
     document.getElementById('restoreForm').addEventListener('submit', async (event) => {
       event.preventDefault();

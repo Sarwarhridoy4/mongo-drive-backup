@@ -52,20 +52,33 @@ func (s *Service) Restore(ctx context.Context, fileID, mongoURI, database, confi
 	defer os.RemoveAll(workDir)
 
 	archivePath := filepath.Join(workDir, "backup.tar.gz")
+	s.log.Info("restore_download_started", map[string]interface{}{"backup_id": fileID})
 	if err := s.downloader.Download(ctx, fileID, archivePath); err != nil {
-		return err
+		return fmt.Errorf("download backup: %w", err)
 	}
+	archiveInfo, err := os.Stat(archivePath)
+	if err != nil {
+		return fmt.Errorf("downloaded backup is unavailable: %w", err)
+	}
+	if !archiveInfo.Mode().IsRegular() || archiveInfo.Size() == 0 {
+		return fmt.Errorf("downloaded backup is empty")
+	}
+	s.log.Info("restore_download_completed", map[string]interface{}{"backup_id": fileID, "size": archiveInfo.Size()})
 	dumpDir := filepath.Join(workDir, "dump")
 	if err := extractArchive(archivePath, dumpDir); err != nil {
 		return err
 	}
-	databaseDir := filepath.Join(dumpDir, database)
-	if _, err := os.Stat(databaseDir); err != nil {
-		return fmt.Errorf("backup does not contain database %q: %w", database, err)
+	databaseDir, flatDump, err := findDatabaseDir(dumpDir, database)
+	if err != nil {
+		return err
 	}
 
 	// --drop removes each matching collection before restoring it.
-	args := []string{"--uri=" + mongoURI, "--drop", databaseDir}
+	args := []string{"--uri=" + mongoURI, "--drop"}
+	if flatDump {
+		args = append(args, "--db="+database)
+	}
+	args = append(args, databaseDir)
 	s.log.Info("mongodb_restore_started", map[string]interface{}{"database": database, "backup_id": fileID})
 	cmd := exec.CommandContext(ctx, s.mongorestore, args...)
 	output, err := cmd.CombinedOutput()
@@ -75,6 +88,55 @@ func (s *Service) Restore(ctx context.Context, fileID, mongoURI, database, confi
 	}
 	s.log.Info("mongodb_restore_completed", map[string]interface{}{"database": database, "backup_id": fileID})
 	return nil
+}
+
+func findDatabaseDir(dumpDir, database string) (string, bool, error) {
+	direct := filepath.Join(dumpDir, database)
+	if info, err := os.Stat(direct); err == nil {
+		if info.IsDir() {
+			return direct, false, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", false, fmt.Errorf("inspect backup database %q: %w", database, err)
+	}
+	if hasDumpFiles(dumpDir) {
+		return dumpDir, true, nil
+	}
+
+	var matches []string
+	err := filepath.WalkDir(dumpDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == dumpDir || !entry.IsDir() || entry.Name() != database {
+			return nil
+		}
+		matches = append(matches, path)
+		return filepath.SkipDir
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("inspect backup contents: %w", err)
+	}
+	if len(matches) == 1 {
+		return matches[0], false, nil
+	}
+	if len(matches) > 1 {
+		return "", false, fmt.Errorf("backup contains multiple directories for database %q", database)
+	}
+	return "", false, fmt.Errorf("backup does not contain database %q", database)
+}
+
+func hasDumpFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".bson") || entry.Name() == "metadata.json") {
+			return true
+		}
+	}
+	return false
 }
 
 func extractArchive(archivePath, destination string) error {

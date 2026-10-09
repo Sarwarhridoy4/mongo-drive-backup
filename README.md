@@ -60,6 +60,35 @@ The dashboard includes a **Stop Service** control. Stopping the service cancels 
 backup/scheduler context and gracefully shuts down the web listener, releasing `WEB_PORT`.
 `--once` mode also exits automatically after the single backup completes.
 
+## Backup and restore instructions
+
+### Create a backup
+
+1. Confirm `MONGODB_URI`, `MONGODB_DATABASE`, Google Drive credentials, and the tool paths are configured.
+2. Run `./run.sh --once` for a one-time backup, or run `./run.sh` to start the scheduler.
+3. To use the dashboard, set `WEB_PORT=8080`, open `http://localhost:8080`, and click **Run Backup Now**.
+4. Confirm the log shows `backup_completed` and note the uploaded filename in the dashboard.
+
+Each backup is made with `mongodump --db=<MONGODB_DATABASE>`, compressed as a `.tar.gz` archive,
+uploaded to the configured Google Drive folder, and removed from the temporary directory after upload.
+The scheduled backup uses `BACKUP_SCHEDULE` and `BACKUP_TIMEZONE`.
+
+### Restore a backup
+
+Restore is destructive: matching collections in the target database are replaced with `--drop`.
+Before continuing, verify the selected Drive file and make a backup of the current target database.
+
+1. Open the authenticated dashboard and select a backup in **Restore a backup**.
+2. Enter the target MongoDB URL. Use **Show** if you need to verify the URL, then hide it again.
+3. Enter the exact source database name stored in the backup. This is normally the database used by
+   `MONGODB_DATABASE` when the backup was created, not necessarily the target database currently configured.
+4. Type `RESTORE` and confirm the browser warning.
+5. Wait for `restore_download_completed`, then `mongodb_restore_completed` in the live logs.
+
+The service downloads the archive into a private temporary directory, validates its paths, and supports
+both normal `database/collection.bson` archives and flat BSON dumps. If the database name is wrong, the
+download can succeed but restore will fail with “backup does not contain database”.
+
 ## Environment Variables
 
 | Variable                         | Description                          | Default                |
@@ -176,21 +205,21 @@ go tool cover -func=coverage.out
 > docker run --rm --env-file .env mongo-drive-backup --once
 > ```
 
-The Docker image installs MongoDB Database Tools through Alpine packages and exposes the tools at
-`/usr/bin/mongodump` and `/usr/bin/mongorestore`. The image also verifies both binaries during the
-build. Keep these values in the production environment:
-
-```env
-MONGODUMP_PATH=/usr/bin/mongodump
-MONGORESTORE_PATH=/usr/bin/mongorestore
-```
-
-For local development without system-wide installation, the service supports an explicit extracted
-tool path:
+For Ubuntu development, either install MongoDB Database Tools and leave these variables empty so the
+service resolves the tools from `PATH`, or use the bundled local tools:
 
 ```env
 MONGODUMP_PATH=./.tools/mongodb-database-tools/usr/bin/mongodump
 MONGORESTORE_PATH=./.tools/mongodb-database-tools/usr/bin/mongorestore
+```
+
+The Coolify deployment uses the Docker image. It installs MongoDB Database Tools through Alpine
+packages and exposes them at `/usr/bin/mongodump` and `/usr/bin/mongorestore`. The image also
+verifies both binaries during the build. Set these values in Coolify:
+
+```env
+MONGODUMP_PATH=/usr/bin/mongodump
+MONGORESTORE_PATH=/usr/bin/mongorestore
 ```
 
 Do not use the relative `.tools` paths in a Docker or Coolify environment. That directory is excluded

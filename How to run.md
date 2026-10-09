@@ -73,6 +73,25 @@ The service validates the required variables:
 
 ## 3. Install dependencies
 
+For Ubuntu development, use the bundled MongoDB Database Tools or install them system-wide. With the
+bundled tools, set:
+
+```env
+APP_ENV=development
+MONGODUMP_PATH=./.tools/mongodb-database-tools/usr/bin/mongodump
+MONGORESTORE_PATH=./.tools/mongodb-database-tools/usr/bin/mongorestore
+```
+
+For Coolify, deploy with the Dockerfile and set these production paths in Coolify:
+
+```env
+APP_ENV=production
+MONGODUMP_PATH=/usr/bin/mongodump
+MONGORESTORE_PATH=/usr/bin/mongorestore
+```
+
+Do not use the relative `.tools` paths in Coolify; they are excluded from the Docker build context.
+
 ```bash
 go mod download
 ```
@@ -142,9 +161,42 @@ The dashboard shows:
   and typing `RESTORE`
 - OAuth authorize control that becomes disabled automatically when a valid OAuth refresh token already exists
 
-The restore flow is destructive. It downloads the selected Drive archive to a private temporary
-directory and runs `mongorestore --drop`, replacing matching collections in the target database.
-It rejects unsafe archive paths and does not log or persist the MongoDB URL.
+### Backup instructions
+
+For a one-time backup:
+
+```bash
+./run.sh --once
+```
+
+For scheduled backups and the dashboard:
+
+```bash
+./run.sh
+```
+
+Or click **Run Backup Now** in the dashboard. A successful run ends with a `backup_completed` log
+entry and uploads a timestamped `.tar.gz` file to Google Drive. The source database is the value of
+`MONGODB_DATABASE`; the schedule is controlled by `BACKUP_SCHEDULE` and `BACKUP_TIMEZONE`.
+
+### Restore instructions
+
+Restore replaces matching collections in the target database and must be treated as destructive.
+First verify the backup and create a safety backup of the current target database.
+
+1. Open the dashboard and select the required Google Drive backup.
+2. Enter the target MongoDB URL. Use the **Show/Hide** toggle to check the URL without storing it.
+3. Enter the exact database name contained in the selected backup. This is usually the original
+   `MONGODB_DATABASE` value when that backup was created.
+4. Type `RESTORE`, confirm the browser warning, and wait for the restore to finish.
+
+The service downloads the archive to `TEMP_BACKUP_DIR`, validates archive paths, and runs
+`mongorestore --drop`. It supports both normal `database/collection.bson` archives and flat BSON
+dumps. `restore_download_completed` confirms the download; `mongodb_restore_completed` confirms the
+database restore. A download may succeed while restore still fails if the database name does not
+match the archive.
+
+The MongoDB URL is sent only for the restore request and is not logged or persisted by the service.
 
 ## 5. Docker build and run
 
